@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: retroassembly-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
