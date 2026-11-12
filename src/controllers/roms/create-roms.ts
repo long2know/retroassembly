@@ -4,7 +4,7 @@ import { isNotNil, pickBy, omit } from 'es-toolkit'
 import { getContext } from 'hono/context-storage'
 import { HTTPException } from 'hono/http-exception'
 import { DateTime } from 'luxon'
-import { getRunTimeEnv } from '#@/constants/env.ts'
+import { getRunTimeEnv, isMountedLibraryOnly } from '#@/constants/env.ts'
 import { platformMap, type PlatformName } from '#@/constants/platform.ts'
 import { libraryModeEnum, romTable, statusEnum } from '#@/databases/schema.ts'
 import { getFilePartialDigest } from '#@/utils/server/file.ts'
@@ -63,7 +63,7 @@ export async function createRom({ file, md5, platform }: { file: File; md5?: str
   const { currentUser, db, storage, t } = getContext().var
   const { library } = db
 
-  if (currentUser.libraryMode === libraryModeEnum.shared) {
+  if (isMountedLibraryOnly() || currentUser.libraryMode === libraryModeEnum.shared) {
     throw new HTTPException(403, { message: t('error.sharedLibraryReadOnly') })
   }
 

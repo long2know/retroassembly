@@ -1,6 +1,5 @@
 import type { MouseEvent } from 'react'
-import { generatePath } from 'react-router'
-import { routes } from '#@/pages/routes.ts'
+import { getRomUrl } from '#@/pages/library/utils/rom.ts'
 import { useSelectedGames } from '../../atoms.ts'
 import { useIsDemo } from '../../hooks/use-demo.ts'
 import { FavoriteButton } from '../favorite-button.tsx'
@@ -15,10 +14,7 @@ export function GameEntry({ rom }) {
 
   const [selectedGames, setSelectedGames] = useSelectedGames()
 
-  const url = generatePath(isDemo ? routes.demoPlatformRom : routes.libraryPlatformRom, {
-    fileName: rom.fileName,
-    platform: rom.platform,
-  })
+  const url = getRomUrl(rom, isDemo)
   const selecting = selectedGames.length > 0
   function handleClick(event: MouseEvent<HTMLAnchorElement>) {
     if (selecting) {

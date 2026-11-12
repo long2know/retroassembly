@@ -1,9 +1,12 @@
 import { Hono } from 'hono'
 import { RouterContextProvider, createRequestHandler } from 'react-router'
 import { getAuthMode } from '#@/utils/server/auth.ts'
+import { createDrizzle } from '#@/utils/server/drizzle.ts'
+import { initializeMountedLibrary } from '#@/utils/server/mounted-library.ts'
 import app from './app.ts'
 
 getAuthMode()
+await initializeMountedLibrary(createDrizzle().library)
 
 const pages = new Hono()
 

@@ -1,9 +1,10 @@
 import { and, count, countDistinct, desc, eq, gte, inArray, max } from 'drizzle-orm'
 import { getContext } from 'hono/context-storage'
 import { favoriteTable, romTable, stateTable, statusEnum } from '#@/databases/schema.ts'
+import { getRomAccessCondition } from '#@/utils/server/rom-access.ts'
 
 export async function getRomsWithStates({ page = 1, pageSize = 20 } = {}) {
-  const { currentUser, db, effectiveLibraryUserId, preference } = getContext().var
+  const { currentUser, db, preference } = getContext().var
   const { library } = db
 
   const offset = (page - 1) * pageSize
@@ -24,6 +25,7 @@ export async function getRomsWithStates({ page = 1, pageSize = 20 } = {}) {
       isFavorite: favoriteTable.id,
       launchboxGameId: romTable.launchboxGameId,
       libretroGameId: romTable.libretroGameId,
+      mountedSource: romTable.mountedSource,
       platform: romTable.platform,
       rawGameMetadata: romTable.rawGameMetadata,
     })
@@ -39,7 +41,7 @@ export async function getRomsWithStates({ page = 1, pageSize = 20 } = {}) {
     )
     .where(
       and(
-        eq(romTable.userId, effectiveLibraryUserId),
+        getRomAccessCondition(),
         eq(romTable.status, statusEnum.normal),
         inArray(romTable.platform, preference.ui.platforms),
       ),
@@ -62,7 +64,7 @@ export async function getRomsWithStates({ page = 1, pageSize = 20 } = {}) {
   const roms = romsRaw.map(({ isFavorite, ...rom }) => Object.assign(rom, { isFavorite: Boolean(isFavorite) }))
 
   const where = and(
-    eq(romTable.userId, effectiveLibraryUserId),
+    getRomAccessCondition(),
     eq(romTable.status, statusEnum.normal),
     inArray(romTable.platform, preference.ui.platforms),
   )

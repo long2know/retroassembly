@@ -3,6 +3,7 @@ import Fuse from 'fuse.js'
 import { getContext } from 'hono/context-storage'
 import type { PlatformName } from '#@/constants/platform.ts'
 import { favoriteTable, romTable, statusEnum } from '#@/databases/schema.ts'
+import { getRomAccessCondition } from '#@/utils/server/rom-access.ts'
 
 type SearchRomsReturning = Awaited<ReturnType<typeof searchRoms>>
 export type SearchRoms = SearchRomsReturning['roms']
@@ -58,11 +59,11 @@ export async function searchRoms(
     query: string
   } = {} as any,
 ) {
-  const { currentUser, db, effectiveLibraryUserId, preference } = getContext().var
+  const { currentUser, db, preference } = getContext().var
   const { library } = db
 
   const conditions = [
-    eq(romTable.userId, effectiveLibraryUserId),
+    getRomAccessCondition(),
     eq(romTable.status, statusEnum.normal),
     platform ? eq(romTable.platform, platform) : inArray(romTable.platform, preference.ui.platforms),
   ]

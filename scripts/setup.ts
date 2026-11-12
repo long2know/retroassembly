@@ -1,8 +1,10 @@
 import fs from 'fs-extra'
 import { getDirectories } from '../src/constants/env.ts'
+import { getMountedConfiguration } from '../src/utils/server/mounted-files.ts'
 import { exec, prepareWranglerConfig } from './utils.ts'
 
 async function main() {
+  await getMountedConfiguration()
   const { dataDirectory } = getDirectories()
   await Promise.all([exec`react-router typegen`, fs.ensureDir(dataDirectory), prepareWranglerConfig({ force: true })])
   await Promise.all([exec`drizzle-kit generate`, exec`wrangler types src/types/worker-configuration.d.ts`])

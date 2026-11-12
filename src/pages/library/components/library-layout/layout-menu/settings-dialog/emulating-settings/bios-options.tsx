@@ -4,6 +4,7 @@ import { Nostalgist } from 'nostalgist'
 import { useTranslation } from 'react-i18next'
 import useSWRMutation from 'swr/mutation'
 import { client, type InferRequestType, parseResponse } from '#@/api/client.ts'
+import { isMountedFileId } from '#@/constants/mounted-library.ts'
 import { platformMap, type PlatformName } from '#@/constants/platform.ts'
 import { usePreference } from '#@/pages/library/hooks/use-preference.ts'
 import { getFileMd5 } from '#@/utils/isomorphic/misc.ts'
@@ -96,13 +97,19 @@ export function BIOSOptions({ platform }: { readonly platform: PlatformName }) {
       </SettingsTitle>
       <div className='flex flex-col gap-2 px-6'>
         <div className='flex flex-wrap items-center gap-2'>
-          {bioses.map(({ fileName }) => (
+          {bioses.map(({ fileId, fileName }) => (
             <Badge key={fileName} size='3' variant='surface'>
               <span className='icon-[mdi--file]' />
               {fileName}
               <Popover.Root>
                 <Popover.Trigger>
-                  <IconButton disabled={disabled} size='1' title={t('common.delete')} type='button' variant='ghost'>
+                  <IconButton
+                    disabled={disabled || isMountedFileId(fileId)}
+                    size='1'
+                    title={t('common.delete')}
+                    type='button'
+                    variant='ghost'
+                  >
                     <span className='icon-[mdi--close]' />
                   </IconButton>
                 </Popover.Trigger>

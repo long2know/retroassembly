@@ -1,5 +1,5 @@
 import { attemptAsync, compact } from 'es-toolkit'
-import { env } from 'hono/adapter'
+import { env, getRuntimeKey } from 'hono/adapter'
 import { getContext } from 'hono/context-storage'
 import { type msleuth as client, createClient, type IdentifyParameter, type QueryParameter } from 'msleuth/client'
 import QuickLRU from 'quick-lru'
@@ -7,7 +7,7 @@ import { getRunTimeEnv } from '#@/constants/env.ts'
 
 function getCFServiceBinding() {
   const { RETROASSEMBLY_RUN_TIME_MSLEUTH_HOST } = getRunTimeEnv()
-  if (RETROASSEMBLY_RUN_TIME_MSLEUTH_HOST) {
+  if (RETROASSEMBLY_RUN_TIME_MSLEUTH_HOST || getRuntimeKey() !== 'workerd') {
     return
   }
   const c = getContext()
@@ -15,13 +15,24 @@ function getCFServiceBinding() {
   return MSLEUTH.fetch.bind(MSLEUTH)
 }
 
-function createClients() {
+function createClients(signal?: AbortSignal) {
   const runTimeEnv = getRunTimeEnv()
   const hosts = compact([
     runTimeEnv.RETROASSEMBLY_RUN_TIME_MSLEUTH_HOST,
     ...runTimeEnv.RETROASSEMBLY_RUN_TIME_MSLEUTH_FALLBACK_HOST.split(','),
   ])
-  const clients = hosts.map((host) => createClient(host))
+  const clients = hosts.map((host) =>
+    createClient(
+      host,
+      signal
+        ? {
+            async fetch(input, init) {
+              return await fetch(input, { ...init, signal })
+            },
+          }
+        : undefined,
+    ),
+  )
 
   const cfServiceFetch = getCFServiceBinding()
   if (cfServiceFetch) {
@@ -33,13 +44,13 @@ function createClients() {
 }
 
 const queryCache = new QuickLRU<string, Awaited<ReturnType<typeof client.query>>>({ maxSize: 100 })
-async function query(json: QueryParameter) {
+async function query(json: QueryParameter, signal?: AbortSignal) {
   const cacheKey = JSON.stringify(json)
   if (queryCache.has(cacheKey)) {
     return queryCache.get(cacheKey)
   }
 
-  for (const client of createClients()) {
+  for (const client of createClients(signal)) {
     const [, result] = await attemptAsync(() => client.query(json))
     if (result) {
       return result
@@ -47,8 +58,8 @@ async function query(json: QueryParameter) {
   }
 }
 
-async function identify(json: IdentifyParameter) {
-  for (const client of createClients()) {
+async function identify(json: IdentifyParameter, signal?: AbortSignal) {
+  for (const client of createClients(signal)) {
     const [, result] = await attemptAsync(() => client.identify(json))
     if (result) {
       return result

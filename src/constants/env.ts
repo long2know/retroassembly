@@ -21,6 +21,7 @@ export function getRunTimeEnv() {
           workerd: `${Boolean(c?.req.url && new URL(metadata.link).origin === new URL(c.req.url).origin)}`,
         }[runtimeKey] || 'false',
       RETROASSEMBLY_RUN_TIME_DATA_DIRECTORY: path.resolve('data'),
+      RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY: 'false',
       RETROASSEMBLY_RUN_TIME_MAX_AUTO_STATES_PER_ROM: '20',
       RETROASSEMBLY_RUN_TIME_MAX_ROM_COUNT: { node: '', workerd: '1000' }[runtimeKey] || '',
       RETROASSEMBLY_RUN_TIME_MAX_ROM_COUNT_2026: { node: '', workerd: '200' }[runtimeKey] || '',
@@ -34,6 +35,11 @@ export function getRunTimeEnv() {
       RETROASSEMBLY_RUN_TIME_OIDC_REQUIRED_ROLE: '',
       RETROASSEMBLY_RUN_TIME_OIDC_SCOPES: 'openid profile email',
       RETROASSEMBLY_RUN_TIME_OIDC_SESSION_MAX_AGE: '28800000',
+      RETROASSEMBLY_RUN_TIME_SHARED_BIOS_DIRECTORY: '',
+      RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY: 'false',
+      RETROASSEMBLY_RUN_TIME_SHARED_ROM_DIRECTORY: '',
+      RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED: 'true',
+      RETROASSEMBLY_RUN_TIME_SHARED_ROM_SCAN_INTERVAL: '300',
       RETROASSEMBLY_RUN_TIME_SKIP_HOME:
         { node: `${runTimeEnv.NODE_ENV !== 'development'}`, workerd: 'false' }[runtimeKey] || 'false',
       RETROASSEMBLY_RUN_TIME_SKIP_HOME_IF_LOGGED_IN: { node: 'true', workerd: 'false' }[runtimeKey] || 'false',
@@ -44,6 +50,14 @@ export function getRunTimeEnv() {
       RETROASSEMBLY_RUN_TIME_SUPERVISER_USER_IDS: '',
     },
   )
+}
+
+export function isMountedLibraryEnabled() {
+  return getRuntimeKey() === 'node' && getRunTimeEnv().RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY === 'true'
+}
+
+export function isMountedLibraryOnly() {
+  return isMountedLibraryEnabled() && getRunTimeEnv().RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY === 'true'
 }
 
 export function getDirectories() {

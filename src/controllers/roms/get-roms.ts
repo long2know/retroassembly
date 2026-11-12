@@ -2,6 +2,7 @@ import { and, count, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
 import { getContext } from 'hono/context-storage'
 import type { PlatformName } from '#@/constants/platform.ts'
 import { favoriteTable, romTable, statusEnum } from '#@/databases/schema.ts'
+import { getVisibleRomCondition } from '#@/utils/server/rom-access.ts'
 
 type GetRomsReturning = Awaited<ReturnType<typeof getRoms>>
 export type Roms = GetRomsReturning['roms']
@@ -27,17 +28,17 @@ export async function getRoms({
   pageSize = 100,
   platform,
 }: GetRomsParams = {}) {
-  const { currentUser, db, effectiveLibraryUserId, preference } = getContext().var
+  const { currentUser, db, preference } = getContext().var
 
   const { library } = db
 
-  const conditions = [eq(romTable.userId, effectiveLibraryUserId), eq(romTable.status, statusEnum.normal)]
+  const conditions = [getVisibleRomCondition()]
   if (id) {
     conditions.push(eq(romTable.id, id))
   }
   if (platform) {
     conditions.push(eq(romTable.platform, platform))
-  } else {
+  } else if (!id) {
     conditions.push(inArray(romTable.platform, preference.ui.platforms))
   }
   const where = and(...conditions)

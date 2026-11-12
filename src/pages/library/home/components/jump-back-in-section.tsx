@@ -1,8 +1,8 @@
 import { clsx } from 'clsx'
 import { useTranslation } from 'react-i18next'
-import { generatePath, NavLink, useLoaderData } from 'react-router'
+import { NavLink, useLoaderData } from 'react-router'
 import { platformMap } from '#@/constants/platform.ts'
-import { routes } from '#@/pages/routes.ts'
+import { getRomUrl } from '#@/pages/library/utils/rom.ts'
 import type { loader } from '#@/pages/routes/library-home.tsx'
 import { getPlatformIcon, getRomGoodcodes } from '#@/utils/client/library.ts'
 import { GameButtons } from '../../components/game-buttons/game-buttons.tsx'
@@ -32,10 +32,7 @@ export function JumpBackInSection() {
             <GameEntryImage centered rom={rom} />
           </div>
           <div className='flex flex-col justify-center gap-4'>
-            <NavLink
-              className='group flex items-center gap-2'
-              to={generatePath(routes.libraryPlatformRom, { fileName: rom.fileName, platform: rom.platform })}
-            >
+            <NavLink className='group flex items-center gap-2' to={getRomUrl(rom)}>
               {({ isPending }) => (
                 <>
                   <h3 className='text-4xl font-semibold'>{getRomGoodcodes(rom).rom}</h3>

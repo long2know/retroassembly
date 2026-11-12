@@ -3,13 +3,16 @@ import { useLocation } from 'react-router'
 import { libraryModeEnum } from '#@/databases/schema.ts'
 import { useGlobalLoaderData } from '#@/pages/hooks/use-global-loader-data.ts'
 
-export function useGameActions() {
+export function useGameActions(mounted = false) {
   const { t } = useTranslation()
   const { pathname } = useLocation()
-  const { currentUser } = useGlobalLoaderData()
+  const { currentUser, env } = useGlobalLoaderData()
   const pageType = pathname === '/library/history' ? 'history' : 'library'
 
-  const isSharedLibrary = currentUser?.libraryMode === libraryModeEnum.shared
+  const isMountedOnly =
+    env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY === 'true' &&
+    env.RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY === 'true'
+  const isSharedLibrary = currentUser?.libraryMode === libraryModeEnum.shared && !mounted && !isMountedOnly
 
   const actionsMap = {
     history: [

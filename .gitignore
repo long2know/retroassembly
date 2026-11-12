@@ -1,5 +1,12 @@
 .dev.vars
 .env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.squad/
+/artifacts/
+/tooling/
 .react-router
 .vite-hooks
 .wrangler
@@ -11,4 +18,5 @@ playwright-report
 src/types/worker-configuration.d.ts
 test-results
 tests/e2e/fixtures/files
+tests/.mounted-library-fixtures
 wrangler.json

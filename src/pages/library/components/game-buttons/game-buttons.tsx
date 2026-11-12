@@ -1,4 +1,4 @@
-import { Button, HoverCard } from '@radix-ui/themes'
+import { Button, Callout, HoverCard } from '@radix-ui/themes'
 import { clsx } from 'clsx'
 import type { MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -26,6 +26,17 @@ export function GameButtons() {
   const { t } = useTranslation()
 
   const platformName = t(platformMap[rom.platform].displayNameI18nKey)
+
+  if (rom.mountedSource?.unsupportedReason) {
+    return (
+      <Callout.Root>
+        <Callout.Icon>
+          <span className='icon-[mdi--warning]' />
+        </Callout.Icon>
+        <Callout.Text>{rom.mountedSource.unsupportedReason}</Callout.Text>
+      </Callout.Root>
+    )
+  }
 
   return (
     <EmulatorSessionProvider>

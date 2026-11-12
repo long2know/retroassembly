@@ -27,6 +27,27 @@
 
 RetroAssembly is the personal retro game collection cabinet in your browser.
 
+## This fork: mounted libraries and GHCR
+
+This is the MIT-licensed [long2know fork](https://github.com/long2know/retroassembly) of
+[arianrhodsandlot/retroassembly](https://github.com/arianrhodsandlot/retroassembly).
+It adds read-only mounted ROM/BIOS libraries while keeping emulation in the browser.
+Upstream credit, sponsorship links, and the original [MIT license](license) are preserved.
+
+Use **`ghcr.io/long2know/retroassembly:latest`** (the untagged image name also selects `latest`).
+The published target is **linux/amd64**, not a universal platform/core compatibility promise.
+
+- [Ready-to-copy Compose](deploy/compose.yaml): `retroassembly`, UID/GID `1000:1000`,
+  host `8910` → container `8000`, writable `${DOCKER_DATA}/retroassembly/data`, and read-only
+  `/mnt/emu/Emulation/roms` and `/mnt/emu/Emulation/bios`. Native saves/storage are not mounted.
+- [Deployment, all Compose environment options, updates and digest rollback](deploy/README.md).
+- [GitHub-hosted source builds, test/publish workflow, manual triggers and safe upstream merges](deploy/README.md#github-hosted-builds-and-publication).
+- [Mounted-library behavior and compatibility limits](docs/mounted-library.md).
+
+No local image archive, task tooling, private collection, credentials, or app data is needed
+to recover or rebuild this fork. The self-hosting instructions below describe upstream;
+use the fork's deployment guide above for its mounted-library image.
+
 ## Features
 
 - [x] Relive memories from numerous retro gaming consoles in the browser. NES, SNES, Genesis, GameBoy, Arcade... See [Supported Platforms](#supported-platforms) below.

@@ -1,9 +1,11 @@
 import { eq, type InferInsertModel } from 'drizzle-orm'
 import { getContext } from 'hono/context-storage'
+import { isMountedFileId } from '#@/constants/mounted-library.ts'
 import { platforms } from '#@/constants/platform.ts'
 import { type PreferenceSnippet, resolveUserPreference } from '#@/constants/preference.ts'
 import { userPreferenceTable } from '#@/databases/schema.ts'
 import { mergePreference } from '#@/utils/isomorphic/preference.ts'
+import { mergeMountedPreference } from './get-preference.ts'
 
 function normalize(preference: any) {
   // sort platforms and remove invalid platforms
@@ -16,6 +18,12 @@ function normalize(preference: any) {
 }
 
 export async function updatePreference(preference: PreferenceSnippet) {
+  preference = structuredClone(preference)
+  for (const platform of Object.values(preference.emulator?.platform || {})) {
+    if (platform?.bioses) {
+      platform.bioses = platform.bioses.filter((bios) => !bios.fileId || !isMountedFileId(bios.fileId))
+    }
+  }
   const { currentUser, db } = getContext().var
 
   const where = eq(userPreferenceTable.userId, currentUser.id)
@@ -58,5 +66,8 @@ export async function updatePreference(preference: PreferenceSnippet) {
       .returning(returning)
   }
 
-  return resolveUserPreference(newPreferenceResults[0])
+  return await mergeMountedPreference(
+    resolveUserPreference(newPreferenceResults[0]),
+    Boolean(newPreferenceResults[0]?.ui?.platforms),
+  )
 }

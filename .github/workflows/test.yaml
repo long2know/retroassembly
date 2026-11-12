@@ -1,28 +1,288 @@
-name: test
-on: [push]
+name: Verify and publish
+
+on:
+  push:
+    branches: [main, 'stlong/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: retroassembly-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/long2know/retroassembly
+  TEST_IMAGE: retroassembly:ci-${{ github.sha }}
+  WRANGLER_SEND_METRICS: 'false'
+  SKIP_INSTALL_SIMPLE_GIT_HOOKS: 'true'
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    environment:
-      name: test
+  verify:
+    name: Source and production Docker acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      image-id: ${{ steps.identity.outputs.image-id }}
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version-file: package.json
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.11.2
+          run_install: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.12.1
           cache: pnpm
-
-      - run: pnpm install
-      - run: node --run=setup
-      - run: node --run=lint
-      - run: node --run=test
-
-      - uses: actions/upload-artifact@v7
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Worker and Router types
+        run: |
+          node --input-type=module -e "import {prepareWranglerConfig} from './scripts/utils.ts'; await prepareWranglerConfig({force:true})"
+          pnpm exec wrangler types src/types/worker-configuration.d.ts
+          pnpm exec react-router typegen
+      - run: pnpm test:unit
+      - name: Formatting, lint and types with no warnings
+        run: |
+          mkdir -p node_modules/.cache/ci
+          pnpm vp check --fix 2>&1 | tee node_modules/.cache/ci/source-check.log
+          grep -F 'Found no warnings, lint errors, or type errors' node_modules/.cache/ci/source-check.log
+          git diff --binary > node_modules/.cache/ci/source-formatting.patch
+          git diff --exit-code
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build linux/amd64 production image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          tags: ${{ env.TEST_IMAGE }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/long2know/retroassembly
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+          build-args: RETROASSEMBLY_BUILD_TIME_VITE_VERSION=${{ github.sha }}
+          cache-from: type=gha,scope=retroassembly-amd64
+          cache-to: type=gha,mode=max,scope=retroassembly-amd64
+      - name: Record built image identity
+        id: identity
+        run: |
+          image_id=$(docker image inspect "$TEST_IMAGE" --format '{{.Id}}')
+          echo "image-id=$image_id" >> "$GITHUB_OUTPUT"
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Prove a writable ROM bind fails the acceptance gate
+        env:
+          RETROASSEMBLY_MOUNTED_TEST_IMAGE: ${{ env.TEST_IMAGE }}
+          RETROASSEMBLY_MOUNTED_TEST_BROWSER: chromium
+          RETROASSEMBLY_MOUNTED_TEST_MUTATION: rw-rom-bind
+          RETROASSEMBLY_MOUNTED_TEST_REPORT: node_modules/.cache/ci/mutation.json
+        run: |
+          if node tests/e2e/mounted-library-docker.ts; then
+            echo '::error::Writable ROM bind unexpectedly passed'
+            exit 1
+          fi
+          node --input-type=module -e "import assert from 'node:assert/strict'; import fs from 'node:fs'; const r=JSON.parse(fs.readFileSync(process.env.RETROASSEMBLY_MOUNTED_TEST_REPORT)); assert.equal(r.passed,false); assert.match(r.error,/\/app\/roms must be a Docker read-only mount/); assert.equal(r.cleanupErrors,undefined)"
+      - name: Real browser, read-only mounts and restart persistence
+        env:
+          RETROASSEMBLY_MOUNTED_TEST_IMAGE: ${{ env.TEST_IMAGE }}
+          RETROASSEMBLY_MOUNTED_TEST_BROWSER: chromium
+          RETROASSEMBLY_MOUNTED_TEST_REPORT: node_modules/.cache/ci/built-image.json
+        run: node tests/e2e/mounted-library-docker.ts
+      - name: Preserve the exact accepted image for trusted publication
+        if: github.repository == 'long2know/retroassembly' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          mkdir -p node_modules/.cache/ci-image
+          docker image save "$TEST_IMAGE" -o node_modules/.cache/ci-image/image.tar
+          cd node_modules/.cache/ci-image
+          sha256sum image.tar > image.tar.sha256
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.repository == 'long2know/retroassembly' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: verified-image-${{ github.sha }}
+          path: node_modules/.cache/ci-image/
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+          retention-days: 3
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: playwright-report
-          path: playwright-report
+          name: built-image-acceptance-${{ github.run_attempt }}
+          path: node_modules/.cache/ci/
+          include-hidden-files: true
+          retention-days: 30
+
+  publish-candidate:
+    name: Publish accepted immutable candidate
+    needs: verify
+    if: github.repository == 'long2know/retroassembly' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-image-${{ github.sha }}
+          path: verified-image
+      - name: Load only the exact accepted image
+        env:
+          EXPECTED_IMAGE_ID: ${{ needs.verify.outputs.image-id }}
+        run: |
+          cd verified-image
+          sha256sum --check image.tar.sha256
+          docker image load -i image.tar
+          test "$(docker image inspect "$TEST_IMAGE" --format '{{.Id}}')" = "$EXPECTED_IMAGE_ID"
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Push commit tag without overwriting an existing identity
+        id: push
+        run: |
+          immutable="$IMAGE:sha-$GITHUB_SHA"
+          if docker manifest inspect "$immutable" >/dev/null 2>&1; then
+            echo '::error::This commit tag already exists; rerun failed downstream jobs or verify the existing digest instead of overwriting it.'
+            exit 1
+          fi
+          docker image tag "$TEST_IMAGE" "$immutable"
+          docker image push "$immutable"
+          reference=$(docker image inspect "$immutable" --format '{{index .RepoDigests 0}}')
+          digest=${reference#*@}
+          [[ "$reference" == "$IMAGE@sha256:"* && "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          printf 'Candidate: `%s`\n\nDigest: `%s`\n' "$immutable" "$digest" >> "$GITHUB_STEP_SUMMARY"
+
+  verify-registry:
+    name: Pull GHCR digest and repeat real browser acceptance
+    needs: [verify, publish-candidate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DIGEST: ${{ needs.publish-candidate.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.11.2
+          run_install: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.12.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Pull and verify exact image and OCI provenance
+        env:
+          EXPECTED_IMAGE_ID: ${{ needs.verify.outputs.image-id }}
+        run: |
+          docker image pull "$IMAGE@$DIGEST"
+          test "$(docker image inspect "$IMAGE@$DIGEST" --format '{{.Id}}')" = "$EXPECTED_IMAGE_ID"
+          test "$(docker image inspect "$IMAGE@$DIGEST" --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+          test "$(docker image inspect "$IMAGE@$DIGEST" --format '{{index .Config.Labels "org.opencontainers.image.source"}}')" = https://github.com/long2know/retroassembly
+          test "$(docker image inspect "$IMAGE@$DIGEST" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+          test "$(docker image inspect "$IMAGE@$DIGEST" --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}')" = MIT
+      - name: Real acceptance against registry-pulled digest
+        env:
+          RETROASSEMBLY_MOUNTED_TEST_IMAGE: ${{ env.IMAGE }}@${{ env.DIGEST }}
+          RETROASSEMBLY_MOUNTED_TEST_BROWSER: chromium
+          RETROASSEMBLY_MOUNTED_TEST_REPORT: node_modules/.cache/ci/registry-image.json
+        run: node tests/e2e/mounted-library-docker.ts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: registry-image-acceptance-${{ github.run_attempt }}
+          path: node_modules/.cache/ci/registry-image.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
+  promote:
+    name: Promote verified digest to latest
+    needs: [publish-candidate, verify-registry]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    env:
+      DIGEST: ${{ needs.publish-candidate.outputs.digest }}
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Promote only current main, retaining the tested manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api repos/long2know/retroassembly/git/ref/heads/main --jq .object.sha)" = "$GITHUB_SHA"
+          docker buildx imagetools create --prefer-index=false --tag "$IMAGE:latest" "$IMAGE@$DIGEST"
+          actual=$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{json .Manifest}}' | jq -r .digest)
+          test "$actual" = "$DIGEST"
+          printf 'Published: `%s:latest`\n\nImmutable: `%s:sha-%s`\n\nDigest: `%s`\n\nRegistry-pulled Docker/browser/read-only/persistence acceptance passed before promotion.\n' "$IMAGE" "$IMAGE" "$GITHUB_SHA" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check anonymous access separately from authenticated acceptance
+        run: |
+          mkdir -p registry-verification
+          node --input-type=module <<'JS'
+          import { createHash } from 'node:crypto'
+          import fs from 'node:fs/promises'
+          const report = { image: process.env.IMAGE, digest: process.env.DIGEST, public: false }
+          try {
+            const response = await fetch('https://ghcr.io/token?service=ghcr.io&scope=repository:long2know/retroassembly:pull')
+            report.tokenStatus = response.status
+            if (!response.ok) throw new Error(`Anonymous token request returned ${response.status}`)
+            const { token } = await response.json()
+            for (const reference of ['latest', `sha-${process.env.GITHUB_SHA}`, process.env.DIGEST]) {
+              const manifest = await fetch(`https://ghcr.io/v2/long2know/retroassembly/manifests/${reference}`, {
+                headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json' },
+              })
+              if (!manifest.ok) throw new Error(`Anonymous manifest ${reference} returned ${manifest.status}`)
+              const digest = `sha256:${createHash('sha256').update(Buffer.from(await manifest.arrayBuffer())).digest('hex')}`
+              if (digest !== report.digest || manifest.headers.get('docker-content-digest') !== report.digest) throw new Error('Anonymous manifest digest differs from accepted image')
+            }
+            report.public = true
+          } catch (error) {
+            report.error = error.message
+            console.log('::warning::Authenticated publication and runtime acceptance passed, but anonymous access is not verified. Package owner: open the container package settings and choose Change visibility -> Public, then run Verify public image.')
+          }
+          await fs.writeFile('registry-verification/anonymous.json', `${JSON.stringify(report, null, 2)}\n`)
+          console.log(JSON.stringify(report))
+          await fs.appendFile(process.env.GITHUB_STEP_SUMMARY, `\nAnonymous public access: **${report.public ? 'verified' : 'NOT verified; owner visibility step may be required'}**.\n`)
+          JS
+      - name: Record package visibility and owner settings link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api users/long2know/packages/container/retroassembly --jq '{name,visibility,html_url}' | tee registry-verification/package.json
+          printf '\nPackage settings: https://github.com/users/long2know/packages/container/retroassembly/settings\n\nIf private: Change visibility → Public, then run the Verify public image workflow with this digest and revision.\n' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: registry-publication-${{ github.run_attempt }}
+          path: registry-verification/
+          if-no-files-found: error
           retention-days: 30

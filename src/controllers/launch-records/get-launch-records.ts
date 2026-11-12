@@ -1,6 +1,7 @@
 import { and, count, countDistinct, desc, eq, inArray, max } from 'drizzle-orm'
 import { getContext } from 'hono/context-storage'
 import { favoriteTable, launchRecordTable, romTable, statusEnum } from '#@/databases/schema.ts'
+import { getVisibleRomCondition } from '#@/utils/server/rom-access.ts'
 
 export async function getLaunchRecords({ page = 1, pageSize = 100 }: { page?: number; pageSize?: number }) {
   const c = getContext()
@@ -12,6 +13,7 @@ export async function getLaunchRecords({ page = 1, pageSize = 100 }: { page?: nu
   const where = and(
     eq(launchRecordTable.userId, currentUser.id),
     eq(launchRecordTable.status, 1),
+    getVisibleRomCondition(),
     inArray(launchRecordTable.platform, preference.ui.platforms),
   )
 
@@ -30,11 +32,12 @@ export async function getLaunchRecords({ page = 1, pageSize = 100 }: { page?: nu
       gameName: romTable.gameName,
       launchboxGameId: romTable.launchboxGameId,
       libretroGameId: romTable.libretroGameId,
+      mountedSource: romTable.mountedSource,
       rawGameMetadata: romTable.rawGameMetadata,
     })
     .from(launchRecordTable)
+    .innerJoin(romTable, eq(launchRecordTable.romId, romTable.id))
     .where(where)
-    .leftJoin(romTable, eq(launchRecordTable.romId, romTable.id))
     .leftJoin(
       favoriteTable,
       and(
@@ -53,6 +56,7 @@ export async function getLaunchRecords({ page = 1, pageSize = 100 }: { page?: nu
   const [{ total }] = await library
     .select({ total: countDistinct(launchRecordTable.romId) })
     .from(launchRecordTable)
+    .innerJoin(romTable, eq(launchRecordTable.romId, romTable.id))
     .where(where)
   const pagination = { current: page, pages: Math.ceil(total / pageSize), size: pageSize, total }
   return {

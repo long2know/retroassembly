@@ -1,7 +1,7 @@
 import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import type { PlatformName } from '#@/constants/platform.ts'
+import { isPlatformName, type PlatformName } from '#@/constants/platform.ts'
 import { addBIOS } from '#@/controllers/preference/add-bios.ts'
 import { deleteBIOS } from '#@/controllers/preference/delete-bios.ts'
 import { getPreference } from '#@/controllers/preference/get-preference.ts'
@@ -32,7 +32,7 @@ export const preference = new Hono()
       'form',
       z.object({
         file: z.instanceof(File),
-        platform: z.string<PlatformName>(),
+        platform: z.custom<PlatformName>(isPlatformName),
       }),
     ),
 
@@ -50,7 +50,7 @@ export const preference = new Hono()
       'query',
       z.object({
         file_name: z.string(),
-        platform: z.string<PlatformName>(),
+        platform: z.custom<PlatformName>(isPlatformName),
       }),
     ),
 

@@ -1,9 +1,10 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { getContext } from 'hono/context-storage'
 import { romTable, statusEnum } from '#@/databases/schema.ts'
+import { getRomAccessCondition } from '#@/utils/server/rom-access.ts'
 
 export async function getRomPlatformCount() {
-  const { db, effectiveLibraryUserId, preference } = getContext().var
+  const { db, preference } = getContext().var
   const { library } = db
 
   const [{ count }] = await library
@@ -11,7 +12,7 @@ export async function getRomPlatformCount() {
     .from(romTable)
     .where(
       and(
-        eq(romTable.userId, effectiveLibraryUserId),
+        getRomAccessCondition(),
         eq(romTable.status, statusEnum.normal),
         inArray(romTable.platform, preference.ui.platforms),
       ),

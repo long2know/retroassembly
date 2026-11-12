@@ -3,6 +3,7 @@ import { createMiddleware } from 'hono/factory'
 import { favorites } from './favorites.ts'
 import { files } from './files.ts'
 import { launchRecords } from './launch-records.ts'
+import { mountedLibrary } from './mounted-library.ts'
 import { preference } from './preference.ts'
 import { roms } from './roms.ts'
 import { states } from './states.ts'
@@ -20,6 +21,7 @@ export const app = new Hono()
   .route('favorites', favorites)
   .route('files', files)
   .route('launch_records', launchRecords)
+  .route('mounted-library', mountedLibrary)
   .route('preference', preference)
   .route('roms', roms)
   .route('states', states)

@@ -12,8 +12,9 @@ export async function loader({ params }: Route.LoaderArgs) {
   assert.ok(params.fileName)
   assert.ok(params.platform)
   const platform = params.platform as PlatformName
-  const rom = await getRom({ fileName: params.fileName, platform })
-  if (!rom) {
+  const id = getContext().req.query('rom_id')
+  const rom = await getRom(id ? { id } : { fileName: params.fileName, platform })
+  if (!rom || rom.platform !== platform || rom.fileName !== params.fileName) {
     throw new Response('Not Found', { status: 404 })
   }
   const { preference } = getContext().var

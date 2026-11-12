@@ -13,6 +13,12 @@ export function GameInfoDataList({ autoFocusField }: Readonly<{ autoFocusField?:
 
   const dataListFields = [
     {
+      icon: 'icon-[mdi--tag]',
+      label: t('common.name'),
+      name: 'gameName',
+      type: 'input' as const,
+    },
+    {
       icon: 'icon-[mdi--calendar]',
       label: t('common.released'),
       name: 'gameReleaseDate',
@@ -57,6 +63,7 @@ export function GameInfoDataList({ autoFocusField }: Readonly<{ autoFocusField?:
     gameDescription: rom.gameDescription ?? launchboxGame?.overview,
     gameDeveloper: rom.gameDeveloper ?? launchboxGame?.developer,
     gameGenres: rom.gameGenres ?? launchboxGame?.genres,
+    gameName: rom.gameName ?? launchboxGame?.name ?? '',
     gamePlayers: rom.gamePlayers ?? launchboxGame?.maxPlayers ?? '',
     gamePublisher: rom.gamePublisher ?? launchboxGame?.publisher,
     gameReleaseDate: rom.gameReleaseDate ?? launchboxGame?.releaseDate,

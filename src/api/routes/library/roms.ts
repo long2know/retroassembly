@@ -1,34 +1,29 @@
-import assert from 'node:assert'
 import path from 'node:path'
 import { zValidator } from '@hono/zod-validator'
 import { pull } from 'es-toolkit'
-import { type Context, Hono } from 'hono'
+import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { DateTime } from 'luxon'
 import { z } from 'zod'
-import type { PlatformName } from '#@/constants/platform.ts'
+import { isPlatformName, type PlatformName } from '#@/constants/platform.ts'
 import { deleteLaunchRecord } from '#@/controllers/launch-records/delete-launch-record.ts'
 import { createRom } from '#@/controllers/roms/create-roms.ts'
 import { deleteRom } from '#@/controllers/roms/delete-rom.ts'
 import { deleteRoms } from '#@/controllers/roms/delete-roms.ts'
 import { getRomContent } from '#@/controllers/roms/get-rom-content.ts'
 import { getRom } from '#@/controllers/roms/get-rom.ts'
+import { getRoms } from '#@/controllers/roms/get-roms.ts'
 import { searchRoms } from '#@/controllers/roms/search-roms.ts'
 import { updateRom } from '#@/controllers/roms/update-rom.ts'
 import { getStates } from '#@/controllers/states/get-states.ts'
-import { libraryModeEnum } from '#@/databases/schema.ts'
 import { dateFormatMap } from '#@/utils/isomorphic/i18n.ts'
+import { getMountedLibrary } from '#@/utils/server/mounted-library-runtime.ts'
 import { nanoid } from '#@/utils/server/nanoid.ts'
+import { requireEditableRom } from '#@/utils/server/rom-access.ts'
 import { createFileResponse } from '../utils.ts'
 
-function assertNotSharedLibrary(c: Context) {
-  const { currentUser, t } = c.var
-  if (currentUser.libraryMode === libraryModeEnum.shared) {
-    throw new HTTPException(403, { message: t('error.sharedLibraryReadOnly') })
-  }
-}
-
 export const roms = new Hono()
+  .get('', async (c) => c.json(await getRoms()))
   .post(
     '',
 
@@ -37,7 +32,7 @@ export const roms = new Hono()
       z.object({
         file: z.instanceof(File),
         md5: z.string().optional(),
-        platform: z.string<PlatformName>(),
+        platform: z.custom<PlatformName>(isPlatformName),
       }),
     ),
 
@@ -96,13 +91,10 @@ export const roms = new Hono()
     ),
 
     async (c) => {
-      assertNotSharedLibrary(c)
-
       const form = c.req.valid('form')
       const { currentUser, storage } = c.var
       const id = c.req.param('id')
-      const rom = await getRom({ id })
-      assert.ok(rom)
+      const rom = await requireEditableRom(id)
 
       const extname = path.extname(form.file.name)
       const fileId = path.join('attachments', currentUser.id, rom.platform, rom.id, `${nanoid()}${extname}`)
@@ -116,7 +108,7 @@ export const roms = new Hono()
     ':id/boxart',
 
     async (c) => {
-      assertNotSharedLibrary(c)
+      await requireEditableRom(c.req.param('id'))
       await updateRom({ gameBoxartFileIds: null, id: c.req.param('id') })
       return c.json(null)
     },
@@ -133,13 +125,10 @@ export const roms = new Hono()
     ),
 
     async (c) => {
-      assertNotSharedLibrary(c)
-
       const form = c.req.valid('form')
       const { currentUser, storage } = c.var
       const id = c.req.param('id')
-      const rom = await getRom({ id })
-      assert.ok(rom)
+      const rom = await requireEditableRom(id)
 
       const gameThumbnailFileIds: string[] = rom.gameThumbnailFileIds?.split(',') || []
       const extname = path.extname(form.file.name)
@@ -155,12 +144,9 @@ export const roms = new Hono()
     ':id/thumbnail/:thumbnailId{.+}',
 
     async (c) => {
-      assertNotSharedLibrary(c)
-      const { currentUser } = c.var
       const id = c.req.param('id')
       const thumbnailId = c.req.param('thumbnailId')
-      const rom = await getRom({ id })
-      assert.ok(rom?.userId === currentUser.id)
+      const rom = await requireEditableRom(id)
       const gameThumbnailFileIds: string[] = rom.gameThumbnailFileIds?.split(',') || []
       pull(gameThumbnailFileIds, [thumbnailId])
       const updatedRom = await updateRom({
@@ -174,9 +160,40 @@ export const roms = new Hono()
   .get(':id/content', async (c) => {
     const object = await getRomContent(c.req.param('id'))
     if (object) {
-      return createFileResponse(object)
+      const head = c.req.method === 'HEAD'
+      if (head && object.body instanceof ReadableStream) {
+        await object.body.cancel()
+      }
+      return createFileResponse(object, undefined, head)
     }
   })
+
+  .post(
+    ':id/identify',
+    zValidator(
+      'json',
+      z.object({
+        launchboxId: z.number().int().positive().optional(),
+        libretroId: z.string().min(1).max(255).optional(),
+        name: z.string().trim().min(1).max(255).optional(),
+      }),
+    ),
+    async (c) => {
+      const rom = await requireEditableRom(c.req.param('id'))
+      const library = getMountedLibrary()
+      if (!rom.mountedSource || !library) {
+        throw new HTTPException(400, { message: 'This identification endpoint requires a mounted ROM' })
+      }
+      try {
+        return c.json(await library.identify(rom, c.req.valid('json')))
+      } catch (error) {
+        throw new HTTPException(502, {
+          cause: error,
+          message: error instanceof Error ? error.message : 'Metadata provider failed; retry or edit manually',
+        })
+      }
+    },
+  )
 
   .get(
     ':id/states',
@@ -240,7 +257,7 @@ export const roms = new Hono()
       z.object({
         page: z.coerce.number().default(1),
         page_size: z.coerce.number().default(100),
-        platform: z.string().optional(),
+        platform: z.custom<PlatformName>(isPlatformName).optional(),
         query: z.string().min(1),
       }),
     ),
@@ -250,9 +267,16 @@ export const roms = new Hono()
       const result = await searchRoms({
         page: queryParams.page,
         pageSize: queryParams.page_size,
-        platform: queryParams.platform as PlatformName,
+        platform: queryParams.platform,
         query: queryParams.query,
       })
       return c.json(result)
     },
   )
+  .get(':id', async (c) => {
+    const rom = await getRom({ id: c.req.param('id') })
+    if (!rom) {
+      throw new HTTPException(404, { message: 'ROM not found' })
+    }
+    return c.json(rom)
+  })

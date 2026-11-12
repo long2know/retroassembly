@@ -19,7 +19,7 @@ ENV RETROASSEMBLY_BUILD_TIME_VITE_VERSION=$RETROASSEMBLY_BUILD_TIME_VITE_VERSION
 ENV SKIP_INSTALL_SIMPLE_GIT_HOOKS=true
 COPY . .
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm i
+    pnpm install --frozen-lockfile
 RUN node --run=build
 
 FROM ${PROD_IMAGE} AS deps-production
@@ -29,14 +29,16 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches patches
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm i --prod
+    pnpm install --prod --frozen-lockfile
 
 FROM ${PROD_IMAGE} AS production
 WORKDIR /app
 COPY --from=builder /app/package.json ./
+COPY --from=builder /app/license ./
 COPY --from=builder /app/src/databases ./src/databases
 COPY --from=builder /app/dist ./dist
 COPY --from=deps-production /app/node_modules ./node_modules
+RUN chmod -R a+rX /app
 
 VOLUME ["/app/data"]
 EXPOSE 8000

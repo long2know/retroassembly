@@ -11,6 +11,7 @@ import devtoolsJson from 'vite-plugin-devtools-json'
 import { defineConfig, type Plugin, type UserConfig } from 'vite-plus'
 import { getTargetRuntime, logServerInfo, prepareWranglerConfig } from './scripts/utils.ts'
 import { getDirectories } from './src/constants/env.ts'
+import { getMountedConfiguration } from './src/utils/server/mounted-files.ts'
 
 defaults(process.env, {
   RETROASSEMBLY_BUILD_TIME_VITE_BUILD_TIME: DateTime.now().setZone('utc').toISO(),
@@ -105,6 +106,7 @@ export default defineConfig(async (env) => {
     }
   } else {
     if (env.command === 'serve') {
+      await getMountedConfiguration()
       const { storageDirectory } = getDirectories()
       await fs.ensureDir(storageDirectory)
       await execaNode`./src/utils/server/migration/initalization.ts`

@@ -14,7 +14,7 @@ export function GameEntryDropdownMenu({ rom }) {
   const { pathname } = useLocation()
   const isDemo = useIsDemo()
   const { currentUser } = useGlobalLoaderData()
-  const { actions } = useGameActions()
+  const { actions } = useGameActions(Boolean(rom.mountedSource))
   const [menuOpen, setMenuOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [selectedGames, setSelectedGames] = useSelectedGames()
@@ -37,7 +37,7 @@ export function GameEntryDropdownMenu({ rom }) {
     handler?.()
   }
 
-  if (isDemo || currentUser?.libraryMode === libraryModeEnum.shared) {
+  if (isDemo || (currentUser?.libraryMode === libraryModeEnum.shared && !rom.mountedSource)) {
     return
   }
 

@@ -1,0 +1,38 @@
+services:
+  retroassembly:
+    image: ${RETROASSEMBLY_IMAGE:-ghcr.io/long2know/retroassembly:latest}
+    pull_policy: always
+    container_name: retroassembly
+    restart: unless-stopped
+    user: '${PUID:-1000}:${PGID:-1000}'
+    environment:
+      PUID: '${PUID:-1000}'
+      PGID: '${PGID:-1000}'
+      RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY: '${RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY:-true}'
+      RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY: '${RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY:-true}'
+      RETROASSEMBLY_RUN_TIME_SHARED_ROM_DIRECTORY: '${RETROASSEMBLY_RUN_TIME_SHARED_ROM_DIRECTORY:-/app/roms}'
+      RETROASSEMBLY_RUN_TIME_SHARED_BIOS_DIRECTORY: '${RETROASSEMBLY_RUN_TIME_SHARED_BIOS_DIRECTORY:-/app/bios}'
+      RETROASSEMBLY_RUN_TIME_SHARED_ROM_SCAN_INTERVAL: '${RETROASSEMBLY_RUN_TIME_SHARED_ROM_SCAN_INTERVAL:-300}'
+      RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED: '${RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED:-true}'
+      RETROASSEMBLY_RUN_TIME_DATA_DIRECTORY: '${RETROASSEMBLY_RUN_TIME_DATA_DIRECTORY:-/app/data}'
+      RETROASSEMBLY_RUN_TIME_STORAGE_DIRECTORY: '${RETROASSEMBLY_RUN_TIME_STORAGE_DIRECTORY:-/app/data/storage}'
+    ports:
+      - '${RETROASSEMBLY_HTTP_PORT:-8910}:8000'
+    volumes:
+      - type: bind
+        source: ${DOCKER_DATA:?Set DOCKER_DATA to your application-data parent}/retroassembly/data
+        target: /app/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RETROASSEMBLY_ROM_SOURCE:-/mnt/emu/Emulation/roms}
+        target: /app/roms
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RETROASSEMBLY_BIOS_SOURCE:-/mnt/emu/Emulation/bios}
+        target: /app/bios
+        read_only: true
+        bind:
+          create_host_path: false

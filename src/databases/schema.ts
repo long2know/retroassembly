@@ -1,4 +1,6 @@
+import { sql } from 'drizzle-orm'
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import type { MountedSource } from '#@/constants/mounted-library.ts'
 import type { PlatformName } from '#@/constants/platform.ts'
 import type { PreferenceSnippet } from '../constants/preference.ts'
 import { nanoid } from '../utils/server/nanoid.ts'
@@ -104,6 +106,8 @@ export const romTable = sqliteTable(
       libretro?: any
     }>(),
     ...fileSchema,
+    mountedSource: text({ mode: 'json' }).$type<MountedSource>(),
+    userId: text(),
   },
   (table) => [
     index('idx_roms_user_status_platform').on(table.userId, table.status, table.platform),
@@ -114,6 +118,9 @@ export const romTable = sqliteTable(
     index('idx_roms_file_status').on(table.fileId, table.status),
     // For get-rom.ts: lookup ROM by filename when ID not provided
     index('idx_roms_user_platform_filename').on(table.userId, table.platform, table.fileName),
+    uniqueIndex('idx_roms_mounted_file')
+      .on(table.fileId)
+      .where(sql`${table.userId} IS NULL`),
   ],
 )
 

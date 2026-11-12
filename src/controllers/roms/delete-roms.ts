@@ -1,24 +1,25 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import { getContext } from 'hono/context-storage'
-import { HTTPException } from 'hono/http-exception'
-import { libraryModeEnum, launchRecordTable, romTable, statusEnum } from '#@/databases/schema.ts'
+import { isMountedFileId } from '#@/constants/mounted-library.ts'
+import { launchRecordTable, romTable, statusEnum } from '#@/databases/schema.ts'
+import { requireEditableRom } from '#@/utils/server/rom-access.ts'
 
 export async function deleteRoms(ids: string[]) {
-  const { currentUser, db, storage, t } = getContext().var
+  const { currentUser, db, storage } = getContext().var
   const { library } = db
-
-  if (currentUser.libraryMode === libraryModeEnum.shared) {
-    throw new HTTPException(403, { message: t('error.sharedLibraryReadOnly') })
-  }
 
   if (ids.length === 0) {
     return
   }
 
+  for (const id of ids) {
+    await requireEditableRom(id)
+  }
+
   const deletedRoms = await library
     .update(romTable)
     .set({ status: statusEnum.deleted })
-    .where(and(inArray(romTable.id, ids), eq(romTable.userId, currentUser.id)))
+    .where(inArray(romTable.id, ids))
     .returning({ fileId: romTable.fileId })
 
   await library
@@ -33,6 +34,8 @@ export async function deleteRoms(ids: string[]) {
     .from(romTable)
     .where(and(inArray(romTable.fileId, uniqueFileIds), eq(romTable.status, statusEnum.normal)))
   const stillReferencedFileIds = new Set(stillReferencedFiles.map((row) => row.fileId))
-  const filesToDelete = uniqueFileIds.filter((fileId) => !stillReferencedFileIds.has(fileId))
+  const filesToDelete = uniqueFileIds.filter(
+    (fileId) => !isMountedFileId(fileId) && !stillReferencedFileIds.has(fileId),
+  )
   await Promise.allSettled(filesToDelete.map((fileId) => storage.delete(fileId)))
 }

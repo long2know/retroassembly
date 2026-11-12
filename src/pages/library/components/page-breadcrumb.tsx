@@ -2,6 +2,7 @@ import { Button } from '@radix-ui/themes'
 import { Fragment } from 'react'
 import { useTranslation } from 'react-i18next'
 import { generatePath, useLocation } from 'react-router'
+import { getRomUrl } from '#@/pages/library/utils/rom.ts'
 import { routes } from '#@/pages/routes.ts'
 import { getPlatformGameIcon, getPlatformIcon, getRomGoodcodes } from '#@/utils/client/library.ts'
 import { useIsDemo } from '../hooks/use-demo.ts'
@@ -76,10 +77,7 @@ export function PageBreadcrumb() {
           />
         ),
         text: getRomGoodcodes(rom).rom,
-        url: generatePath(isDemo ? routes.demoPlatformRom : routes.libraryPlatformRom, {
-          fileName: rom.fileName,
-          platform: rom.platform,
-        }),
+        url: getRomUrl(rom, isDemo),
       })
     }
   }

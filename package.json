@@ -1,6 +1,6 @@
 {
   "private": true,
-  "repository": "arianrhodsandlot/retroassembly",
+  "repository": "long2know/retroassembly",
   "type": "module",
   "imports": {
     "#@/*": "./src/*"
@@ -22,7 +22,7 @@
     "start": "node --run=serve",
     "tag": "node scripts/tag.ts",
     "test": "playwright test -c tests/e2e --tsconfig=tests/e2e/tsconfig.playwright.json",
-    "test:unit": "node --test tests/unit/*.test.ts"
+    "test:unit": "node tests/run-unit.ts"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",

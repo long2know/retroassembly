@@ -3,7 +3,7 @@ import { clsx } from 'clsx'
 import { compact } from 'es-toolkit'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { generatePath, Link } from 'react-router'
+import { Link } from 'react-router'
 import { Fragment } from 'react/jsx-runtime'
 import scrollIntoView from 'smooth-scroll-into-view-if-needed'
 import { platformMap } from '#@/constants/platform.ts'
@@ -12,7 +12,7 @@ import { useSpatialNavigationPaused } from '#@/pages/library/atoms.ts'
 import { skeletonClassnames } from '#@/pages/library/constants/skeleton-classnames.ts'
 import { usePreference } from '#@/pages/library/hooks/use-preference.ts'
 import { useRomCover } from '#@/pages/library/hooks/use-rom-cover.ts'
-import { routes } from '#@/pages/routes.ts'
+import { getRomUrl } from '#@/pages/library/utils/rom.ts'
 import { getPlatformIcon, getRomGoodcodes } from '#@/utils/client/library.ts'
 import { DistrictIcon } from '../../district-icon.tsx'
 import { useShowSearchModal } from '../atoms.ts'
@@ -47,7 +47,7 @@ export function SearchResultItem({ keyword, rom }: Readonly<SearchResultItemProp
     setShowSearchModal(false)
   }
 
-  const romUrl = generatePath(routes.libraryPlatformRom, { fileName: rom.fileName, platform: rom.platform })
+  const romUrl = getRomUrl(rom)
   const keywordChars = compact([...keyword.replace(/\s+/u, '').toLowerCase()])
 
   function handleMouseMove() {

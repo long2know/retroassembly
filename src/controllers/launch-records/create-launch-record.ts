@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm'
 import { getContext } from 'hono/context-storage'
-import { launchRecordTable, romTable } from '#@/databases/schema.ts'
+import { HTTPException } from 'hono/http-exception'
+import { launchRecordTable } from '#@/databases/schema.ts'
+import { requireRom } from '#@/utils/server/rom-access.ts'
 
 interface CreateRomParams {
   core: string
@@ -11,8 +12,10 @@ export async function createLaunchRecord(params: CreateRomParams) {
   const { currentUser, db } = getContext().var
   const { library } = db
 
-  const results = await library.select().from(romTable).where(eq(romTable.id, params.rom))
-  const [rom] = results
+  const rom = await requireRom(params.rom)
+  if (rom.mountedSource?.unsupportedReason) {
+    throw new HTTPException(422, { message: rom.mountedSource.unsupportedReason })
+  }
 
   const [result] = await library
     .insert(launchRecordTable)

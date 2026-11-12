@@ -11,13 +11,17 @@ import { UploadDialog } from './upload-dialog.tsx'
 
 export function UploadSelectButton({ variant = 'soft' }: Readonly<{ variant?: ButtonProps['variant'] }>) {
   const { t } = useTranslation()
-  const { currentUser } = useGlobalLoaderData()
+  const { currentUser, env } = useGlobalLoaderData()
   const { preference } = usePreference()
   const [key, setKey] = useState(Date.now)
   const [open, setOpen] = useState(false)
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformName>()
 
-  if (currentUser?.libraryMode === libraryModeEnum.shared) {
+  if (
+    currentUser?.libraryMode === libraryModeEnum.shared ||
+    (env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY === 'true' &&
+      env.RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY === 'true')
+  ) {
     return null
   }
 

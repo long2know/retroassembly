@@ -15,7 +15,9 @@ export function useGameListActions() {
 
   const isHistoryPage = pathname === routes.libraryHistory
   const isFavoritesPage = pathname === routes.libraryFavorites
-  const isSharedLibrary = currentUser?.libraryMode === libraryModeEnum.shared
+  const isSharedLibrary =
+    currentUser?.libraryMode === libraryModeEnum.shared &&
+    !roms.some((rom) => 'mountedSource' in rom && rom.mountedSource)
   const shouldHideActions = isDemo || isHistoryPage || isSharedLibrary
 
   const searchParams = new URLSearchParams(search)

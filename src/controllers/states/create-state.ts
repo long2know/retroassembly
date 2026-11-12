@@ -1,10 +1,10 @@
 import path from 'node:path'
 import { and, desc, eq } from 'drizzle-orm'
 import { getContext } from 'hono/context-storage'
-import { HTTPException } from 'hono/http-exception'
 import { getRunTimeEnv } from '#@/constants/env.ts'
-import { romTable, stateTable } from '#@/databases/schema.ts'
+import { stateTable } from '#@/databases/schema.ts'
 import { nanoid } from '#@/utils/server/nanoid.ts'
+import { requireRom } from '#@/utils/server/rom-access.ts'
 import { deleteStates } from './delete-states.ts'
 
 interface CreateStateParams {
@@ -16,19 +16,12 @@ interface CreateStateParams {
 }
 
 export async function createState({ core, rom, state, thumbnail, type }: CreateStateParams) {
-  const { currentUser, db, effectiveLibraryUserId, storage } = getContext().var
+  const { currentUser, db, storage } = getContext().var
   if (!currentUser) {
     throw new Error('Unauthorized')
   }
 
-  const [romResult] = await db.library
-    .select()
-    .from(romTable)
-    .where(and(eq(romTable.id, rom), eq(romTable.userId, effectiveLibraryUserId)))
-    .limit(1)
-  if (!romResult) {
-    throw new HTTPException(404, { message: 'ROM not found' })
-  }
+  const romResult = await requireRom(rom)
 
   const id = nanoid()
   const stateFileId = path.join('states', currentUser.id, romResult.platform, rom, `${id}.state`)

@@ -1,8 +1,7 @@
-import { and, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { getContext } from 'hono/context-storage'
-import { HTTPException } from 'hono/http-exception'
-import { libraryModeEnum, romTable } from '#@/databases/schema.ts'
-import { getRom } from './get-rom.ts'
+import { romTable } from '#@/databases/schema.ts'
+import { requireEditableRom } from '#@/utils/server/rom-access.ts'
 
 export async function updateRom(rom: {
   gameBoxartFileIds?: null | string
@@ -16,24 +15,21 @@ export async function updateRom(rom: {
   gameThumbnailFileIds?: null | string
   id: string
 }) {
-  const { currentUser, db, t } = getContext().var
-
-  if (currentUser.libraryMode === libraryModeEnum.shared) {
-    throw new HTTPException(403, { message: t('error.sharedLibraryReadOnly') })
-  }
-
+  const { db } = getContext().var
   const { library } = db
 
   const { id } = rom
-  const existingRom = await getRom({ id })
-  if (!existingRom) {
-    throw new Error('ROM not found or access denied')
-  }
+  const existingRom = await requireEditableRom(id)
 
   const [updatedRom] = await library
     .update(romTable)
-    .set(rom)
-    .where(and(eq(romTable.id, id), eq(romTable.userId, currentUser.id)))
+    .set({
+      ...rom,
+      ...(existingRom.mountedSource
+        ? { mountedSource: { ...existingRom.mountedSource, metadata: 'manual', metadataError: undefined } }
+        : {}),
+    })
+    .where(eq(romTable.id, id))
     .returning()
 
   return updatedRom

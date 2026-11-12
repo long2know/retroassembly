@@ -64,7 +64,10 @@ export function useEmulator() {
   const shader =
     platformShader === 'inherit' ? preference.emulator.shader : (platformShader ?? preference.emulator.shader)
 
-  const romObject = useMemo(() => ({ fileContent: romUrl, fileName: rom?.fileName }), [rom, romUrl])
+  const romObject = useMemo(
+    () => ({ fileContent: romUrl, fileName: rom.fileName.split('/').at(-1) || rom.fileName }),
+    [rom, romUrl],
+  )
   const bios = preference.emulator.platform[rom.platform].bioses.map(({ fileId, fileName }) => ({
     fileContent: getFileUrl(fileId),
     fileName,
@@ -98,12 +101,12 @@ export function useEmulator() {
     error,
     isValidating,
     mutate: prepare,
-  } = useSWRImmutable(options, () => Nostalgist.prepare(options))
+  } = useSWRImmutable(rom.mountedSource?.unsupportedReason ? null : options, () => Nostalgist.prepare(options))
 
   const isPreparing = !rom || isValidating
 
   async function launch({ withState }: { withState?: boolean } = {}) {
-    if (!emulator || !rom) {
+    if (!emulator || !rom || rom.mountedSource?.unsupportedReason) {
       return
     }
 

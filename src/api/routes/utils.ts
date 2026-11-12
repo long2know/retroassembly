@@ -22,8 +22,9 @@ function getContentType(fileId: string) {
 }
 
 export function createFileResponse(
-  object: { body: Buffer<ArrayBuffer>; httpEtag: string; size: number } | R2ObjectBody,
+  object: { body: BodyInit; httpEtag: string; size: number } | R2ObjectBody,
   fileId?: string,
+  head = false,
 ) {
   const headers = new Headers()
   // this may fail when using miniflare
@@ -37,8 +38,16 @@ export function createFileResponse(
     if (contentType) {
       headers.set('Content-Type', contentType)
     }
+    if (!headers.get('Content-Type')) {
+      headers.set('Content-Type', 'application/octet-stream')
+    }
+    headers.set('X-Content-Type-Options', 'nosniff')
+    if (!('range' in object && object.range)) {
+      headers.set('Content-Length', `${object.size}`)
+    }
   }
   headers.set('ETag', object.httpEtag)
+  headers.set('Cache-Control', 'private, no-store')
   if ('range' in object && object.range && 'offset' in object.range && 'end' in object.range) {
     const contentRange = `bytes ${object.range.offset}-${object.range.end ?? object.size - 1}/${object.size}`
     headers.set('Content-Range', contentRange)
@@ -47,5 +56,5 @@ export function createFileResponse(
   if (object.body) {
     status = headers.get('Range') ? 206 : 200
   }
-  return new Response(object.body, { headers, status })
+  return new Response(head ? null : object.body, { headers, status })
 }

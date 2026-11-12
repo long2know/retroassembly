@@ -27,7 +27,7 @@ export function GameMediaDialog({ children }: Readonly<PropsWithChildren>) {
     }
   }
 
-  if (isDemo || currentUser?.libraryMode === libraryModeEnum.shared) {
+  if (isDemo || (currentUser?.libraryMode === libraryModeEnum.shared && !rom.mountedSource)) {
     return
   }
 

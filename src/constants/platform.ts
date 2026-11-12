@@ -1,5 +1,5 @@
 import { mapValues, sortBy } from 'es-toolkit'
-import type { CoreName } from './core'
+import type { CoreName } from './core.ts'
 
 interface Bios {
   md5?: string
@@ -488,3 +488,7 @@ export const platformMap: Record<PlatformName, Platform> = mapValues(
 )
 
 export const platforms = sortBy(Object.values(platformMap), ['displayNameI18nKey'])
+
+export function isPlatformName(value: unknown): value is PlatformName {
+  return typeof value === 'string' && Object.hasOwn(platformMap, value)
+}

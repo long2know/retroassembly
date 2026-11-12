@@ -1,8 +1,10 @@
 import { and, eq } from 'drizzle-orm'
 import { getContext } from 'hono/context-storage'
 import { favoriteTable, statusEnum } from '#@/databases/schema.ts'
+import { requireRom } from '#@/utils/server/rom-access.ts'
 
 export async function addFavorite(romId: string) {
+  await requireRom(romId)
   const { currentUser, db } = getContext().var
   const { library } = db
 
