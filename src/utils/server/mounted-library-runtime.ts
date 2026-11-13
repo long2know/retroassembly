@@ -1,3 +1,4 @@
+import type { MountedLibrarySettings, MountedLibraryStatus } from '#@/constants/mounted-library.ts'
 import type { PlatformName } from '#@/constants/platform.ts'
 import type { romTable } from '#@/databases/schema.ts'
 
@@ -7,18 +8,7 @@ export interface MountedBios {
   mounted: true
 }
 
-export interface MountedScanStatus {
-  biosCount: number
-  error?: string
-  indexed: number
-  lastScanFinishedAt?: string
-  lastScanStartedAt?: string
-  lastSuccessfulScanAt?: string
-  running: boolean
-  unavailable: number
-  unsupported: number
-  warnings: string[]
-}
+export type MountedScanStatus = MountedLibraryStatus
 
 export interface MountedMetadataMatch {
   launchboxId?: number
@@ -32,6 +22,9 @@ interface MountedLibraryRuntime {
   getBioses: (platform: PlatformName) => MountedBios[]
   getStatus: () => MountedScanStatus
   identify: (rom: typeof romTable.$inferSelect, match: MountedMetadataMatch) => Promise<typeof romTable.$inferSelect>
+  refreshMetadata: (options?: { platform?: PlatformName; retryArtwork?: boolean }) => MountedLibraryStatus
+  retryArtwork: (options?: { platform?: PlatformName }) => MountedLibraryStatus
+  updateSettings: (settings: Partial<MountedLibrarySettings>) => MountedLibraryStatus
   readFile: (id: string) => Promise<{ body: ReadableStream; httpEtag: string; size: number }>
   scan: () => Promise<MountedScanStatus>
   scheduleEnrichment: () => void

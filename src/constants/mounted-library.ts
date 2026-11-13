@@ -1,10 +1,62 @@
 import { isPlatformName, platformMap, type PlatformName } from './platform.ts'
 
+export interface MountedLibrarySettings {
+  automaticMetadata: boolean
+  scanIntervalSeconds: number
+}
+
+export interface MountedIdentification {
+  version: 1
+  revision: string
+  mode: 'file' | 'zip-entry' | 'arcade-set' | 'name-only' | 'ambiguous'
+  name: string
+  md5?: string
+  payloadName?: string
+  bytes?: number
+  hashedAt?: number
+  confidence?: 'content' | 'filename'
+  error?: string
+}
+
+export interface MountedMetadataProgress {
+  running: boolean
+  operation?: 'metadata' | 'artwork'
+  processed: number
+  total: number
+  errors: number
+  lastStartedAt?: string
+  lastFinishedAt?: string
+  error?: string
+}
+
+export interface MountedLibraryStatus {
+  biosCount: number
+  error?: string
+  indexed: number
+  lastScanFinishedAt?: string
+  lastScanStartedAt?: string
+  lastSuccessfulScanAt?: string
+  running: boolean
+  unavailable: number
+  unsupported: number
+  warnings: string[]
+  settings: MountedLibrarySettings
+  networkAllowed: boolean
+  automaticMetadataEnabled: boolean
+  platforms: { platform: PlatformName; indexed: number; unsupported: number }[]
+  metadata: MountedMetadataProgress
+}
+
 export interface MountedSource {
   available: boolean
   metadata: 'disabled' | 'pending' | 'ready' | 'error' | 'manual'
   metadataError?: string
   metadataAttemptedAt?: number
+  metadataOutcome?: 'matched' | 'no-match' | 'error'
+  artwork?: 'disabled' | 'pending' | 'ready' | 'missing' | 'error' | 'manual'
+  artworkError?: string
+  artworkAttemptedAt?: number
+  identification?: MountedIdentification
   path: string
   revision: string
   unsupportedReason?: string

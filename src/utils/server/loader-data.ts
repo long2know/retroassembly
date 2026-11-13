@@ -6,6 +6,7 @@ import { metadata } from '#@/constants/metadata.ts'
 import { cookieConsentStatusKey } from '#@/constants/misc.ts'
 import { getLaunchRecords } from '#@/controllers/launch-records/get-launch-records.ts'
 import { getAuthMode } from '#@/utils/server/auth.ts'
+import { getMountedLibrary } from '#@/utils/server/mounted-library-runtime.ts'
 
 const { host: officialHost } = new URL(metadata.link)
 
@@ -38,6 +39,7 @@ export function getCommonLoaderData<T>(data: T = {} as T) {
     isLikelyDesktop,
     isOfficialHost,
     language,
+    mountedLibrary: isMountedLibraryEnabled() ? getMountedLibrary()?.getStatus() : undefined,
     preference,
     runtimeKey,
     title: '',
