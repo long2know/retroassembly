@@ -1,6 +1,6 @@
 import { Button, Callout, Card, Switch, TextField } from '@radix-ui/themes'
 import { DateTime } from 'luxon'
-import { useEffect, useRef, useState, type SubmitEvent } from 'react'
+import { startTransition, useEffect, useRef, useState, type SubmitEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useRevalidator } from 'react-router'
 import useSWRMutation from 'swr/mutation'
@@ -23,9 +23,8 @@ export function RomMetadataSettings() {
 
   const { isMutating: isUpdating, trigger: updateSettings } = useSWRMutation(
     { endpoint: 'mounted-library', method: 'patch' },
-    async (_key, { arg }: { arg: MountedSettingsUpdate }) => 
-      await parseResponse(client['mounted-library'].$patch({ json: arg }))
-    ,
+    async (_key, { arg }: { arg: MountedSettingsUpdate }) =>
+      await parseResponse(client['mounted-library'].$patch({ json: arg })),
   )
 
   const { isMutating, trigger: triggerAction } = useSWRMutation(
@@ -44,9 +43,15 @@ export function RomMetadataSettings() {
   useEffect(() => {
     if (previousCompletion.current !== completion) {
       previousCompletion.current = completion
-      revalidate()
+      startTransition(async () => {
+        try {
+          await revalidate()
+        } catch {
+          setRequestError(t('mountedLibrary.loadFailed'))
+        }
+      })
     }
-  }, [completion, revalidate])
+  }, [completion, revalidate, t])
 
   function formatTime(value?: string) {
     if (!value) {
@@ -121,11 +126,7 @@ export function RomMetadataSettings() {
   if (!data) {
     return (
       <Card>
-        {error ? (
-          <p role='alert'>{t('mountedLibrary.loadFailed')}</p>
-        ) : (
-          <output>{t('mountedLibrary.loading')}</output>
-        )}
+        {error ? <p role='alert'>{t('mountedLibrary.loadFailed')}</p> : <output>{t('mountedLibrary.loading')}</output>}
         {error ? (
           <Button className='mt-3' loading={isValidating} onClick={handleReloadStatus} type='button' variant='soft'>
             {t('common.retry')}
