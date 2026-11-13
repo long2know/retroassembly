@@ -216,17 +216,12 @@ async function resolveArtwork(rom: MountedRom, metadata: z.infer<typeof metadata
   }
 }
 
-export async function enrichMountedRom(
-  library: Library,
-  rom: MountedRom,
-  options: EnrichmentOptions = {},
-) {
+export async function enrichMountedRom(library: Library, rom: MountedRom, options: EnrichmentOptions = {}) {
   if (!rom.mountedSource?.available) {
     throw new Error('Mounted source is unavailable')
   }
   assertNetworkAllowed()
-  const match =
-    options.manual || options.launchboxId || options.libretroId || options.name ? options : undefined
+  const match = options.manual || options.launchboxId || options.libretroId || options.name ? options : undefined
   if (rom.mountedSource.metadata === 'manual' && !match) {
     return rom
   }

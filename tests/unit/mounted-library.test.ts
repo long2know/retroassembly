@@ -962,17 +962,15 @@ await describe('mounted shared library', async () => {
     await f.library
       .insert(launchRecordTable)
       .values({ core: 'fceumm', platform: 'nes', romId: manual.id, userId: 'alice' })
-    await f.library
-      .insert(stateTable)
-      .values({
-        core: 'fceumm',
-        fileId: 'states/alice/synthetic',
-        platform: 'nes',
-        romId: manual.id,
-        thumbnailFileId: 'states/alice/synthetic.png',
-        type: 'manual',
-        userId: 'alice',
-      })
+    await f.library.insert(stateTable).values({
+      core: 'fceumm',
+      fileId: 'states/alice/synthetic',
+      platform: 'nes',
+      romId: manual.id,
+      thumbnailFileId: 'states/alice/synthetic.png',
+      type: 'manual',
+      userId: 'alice',
+    })
     let providers = 0
     let covers = 0
     let artworkAvailable = false
@@ -1107,9 +1105,7 @@ await describe('mounted shared library', async () => {
     t.mock.method(globalThis, 'fetch', (input) => {
       const url = getFetchUrl(input)
       if (url.origin === 'https://metadata.fixture.invalid') {
-        return Promise.resolve(
-          Response.json([{ libretro: { id: 'synthetic-art-error', name: 'Art error fixture' } }]),
-        )
+        return Promise.resolve(Response.json([{ libretro: { id: 'synthetic-art-error', name: 'Art error fixture' } }]))
       }
       return Promise.resolve(new Response('Provider unavailable', { status: 503 }))
     })
