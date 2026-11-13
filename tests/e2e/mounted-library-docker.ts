@@ -234,7 +234,7 @@ try {
         const input=JSON.parse(body),file=input.files?.[0];
         const expected=${JSON.stringify([romMd5, zipMd5])};
         const records=${JSON.stringify(providerMetadata)};
-        const index=expected.indexOf(file?.md5);
+        const index=input.platform==='nes'?expected.indexOf(file?.md5):-1;
         console.log(JSON.stringify({method:request.method,url:request.url,input,matched:index>=0}));
         response.writeHead(200,{'Content-Type':'application/json'});
         response.end(JSON.stringify(index>=0?[records[index]]:[]));

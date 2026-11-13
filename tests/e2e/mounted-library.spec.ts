@@ -321,7 +321,7 @@ test('mounted sources remain immutable through content matching, settings, brows
   const settings = await openSettings()
   await settings.getByRole('tab', { exact: true, name: 'Library' }).click()
   const beforeSettingsWrites = preferenceWrites
-  await expect(settings.getByTestId('platform-count-nes')).toHaveText('2')
+  await expect(settings.getByTestId('platform-count-nes')).toHaveText('Indexed: 2')
   await expect(settings.getByRole('checkbox', { exact: true, name: 'NES' })).not.toBeChecked()
   const hideEmpty = settings.getByRole('checkbox', { exact: true, name: 'Hide empty platforms' })
   await hideEmpty.check()
