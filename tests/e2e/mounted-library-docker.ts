@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
+import { Uint8ArrayReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js'
 
 const project = process.cwd()
 const image = process.env.RETROASSEMBLY_MOUNTED_TEST_IMAGE || 'ghcr.io/long2know/retroassembly:latest'
@@ -141,9 +142,18 @@ try {
     await fs.chmod(directory, 0o777)
   }
   const rom = createHomebrew()
+  const zipContent = Buffer.from(rom)
+  zipContent[zipContent.length - 1] = 1
+  const romMd5 = createHash('md5').update(rom).digest('hex')
+  const zipMd5 = createHash('md5').update(zipContent).digest('hex')
+  const zipWriter = new ZipWriter(new Uint8ArrayWriter())
+  await zipWriter.add('Inner Payload.nes', new Uint8ArrayReader(zipContent), { level: 0 })
+  const zipArchive = await zipWriter.close()
+  report.fixtureHashes = { romMd5, zipArchive: hash(zipArchive), zipMd5 }
   const bios = Buffer.from(Array.from({ length: 192 }, (_, index) => (index * 37) % 256))
   const romFile = path.join(romDirectory, 'Immutable Pulse.nes')
   await fs.writeFile(romFile, rom, { mode: 0o666 })
+  await fs.writeFile(path.join(romDirectory, 'GoodTools Alias (U) [!].zip'), zipArchive, { mode: 0o666 })
   await fs.writeFile(path.join(biosRoot, 'nes.pal'), bios, { mode: 0o666 })
   await fs.writeFile(path.join(fixtures, 'outside.nes'), rom)
   await fs.symlink(path.join(fixtures, 'outside.nes'), path.join(romDirectory, 'escape.nes'))
@@ -183,7 +193,19 @@ try {
         name: 'Immutable Pulse — provider metadata',
         overview: 'Controlled provider response for the original synthetic homebrew',
       },
-      libretro: { id: 'immutable-pulse-fixture', name: 'Immutable Pulse (Original Synthetic Fixture)' },
+      libretro: {
+        id: 'immutable-pulse-fixture',
+        md5: romMd5,
+        name: 'Immutable Pulse (Original Synthetic Fixture)',
+      },
+    },
+    {
+      launchbox: {
+        databaseId: 2,
+        name: 'Archive Pulse — content metadata',
+        overview: 'Matched the original NES payload, not its unrelated GoodTools ZIP filename',
+      },
+      libretro: { id: 'archive-pulse-fixture', md5: zipMd5, name: 'Archive Pulse (Original Synthetic Fixture)' },
     },
   ]
   docker(
@@ -205,10 +227,18 @@ try {
     image,
     '-e',
     `require('node:http').createServer((request,response)=>{
-      request.resume();
-      console.log(JSON.stringify({method:request.method,url:request.url}));
-      response.writeHead(200,{'Content-Type':'application/json'});
-      response.end(${JSON.stringify(JSON.stringify(providerMetadata))});
+      if(request.url==='/'){response.writeHead(200);response.end('ready');return}
+      let body='';
+      request.on('data',chunk=>{body+=chunk});
+      request.on('end',()=>{
+        const input=JSON.parse(body),file=input.files?.[0];
+        const expected=${JSON.stringify([romMd5, zipMd5])};
+        const records=${JSON.stringify(providerMetadata)};
+        const index=expected.indexOf(file?.md5);
+        console.log(JSON.stringify({method:request.method,url:request.url,input,matched:index>=0}));
+        response.writeHead(200,{'Content-Type':'application/json'});
+        response.end(JSON.stringify(index>=0?[records[index]]:[]));
+      });
     }).listen(8001,'0.0.0.0');`,
   )
   docker(
@@ -303,7 +333,10 @@ try {
         RETROASSEMBLY_MOUNTED_TEST_BIOS_SHA256: hash(bios),
         RETROASSEMBLY_MOUNTED_TEST_BROWSER_REPORT: browserReportFile,
         RETROASSEMBLY_MOUNTED_TEST_CONTAINER: container,
+        RETROASSEMBLY_MOUNTED_TEST_PROVIDER: provider,
         RETROASSEMBLY_MOUNTED_TEST_ROM_SHA256: hash(rom),
+        RETROASSEMBLY_MOUNTED_TEST_ZIP_CONTENT_MD5: zipMd5,
+        RETROASSEMBLY_MOUNTED_TEST_ZIP_SHA256: hash(zipArchive),
         RETROASSEMBLY_MOUNTED_TEST_URL: url,
       },
       stdio: 'inherit',

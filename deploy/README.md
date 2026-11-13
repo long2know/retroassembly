@@ -51,8 +51,8 @@ a live `.env`; credentials and personal configuration must never be committed.
 | `RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY`         | `true`                                     |
 | `RETROASSEMBLY_RUN_TIME_SHARED_ROM_DIRECTORY`        | `/app/roms`                                |
 | `RETROASSEMBLY_RUN_TIME_SHARED_BIOS_DIRECTORY`       | `/app/bios`                                |
-| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_SCAN_INTERVAL`    | `300` seconds; `0` disables periodic scans |
-| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED` | `true`; `false` disables provider requests |
+| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_SCAN_INTERVAL`    | Initial default: `300` seconds; `0` means manual-only |
+| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED` | `true`; `false` is a hard provider-network disable |
 | `RETROASSEMBLY_RUN_TIME_DATA_DIRECTORY`              | `/app/data`                                |
 | `RETROASSEMBLY_RUN_TIME_STORAGE_DIRECTORY`           | `/app/data/storage`                        |
 
@@ -60,6 +60,40 @@ Keep the internal directory overrides aligned with their mounts. Writable data/s
 must not overlap the immutable source directories; invalid configurations fail closed.
 Enrichment is best-effort and requires provider connectivity. Browser emulator cores are
 downloaded from upstream's pinned CDN URLs; this image is not a fully offline emulator bundle.
+
+## ROM indexing and metadata controls
+
+Open **Settings → Library → Enabled Platforms** to see counts from the existing index,
+including platforms currently disabled in your preferences. **Enable platforms with ROMs**
+explicitly selects platforms with indexed entries; merely opening settings never changes
+that selection or scans the source. **Hide empty platforms** changes the view only.
+
+The mounted-only **Settings → ROM / Metadata** tab separates these actions:
+
+- **Scan ROM folders** reconciles filenames and source availability. Unchanged paths retain
+  their ROM IDs, private save/history associations, manual metadata and app-owned artwork.
+- **Refresh metadata** explicitly retries identification with the existing upstream providers,
+  reusing cached content hashes when the source revision has not changed.
+- **Retry missing covers** is separate from identification. A missing provider image is not a
+  broken ROM; expected HTTP 404 responses are recorded as missing artwork, not success.
+- **Automatic metadata and cover downloads** controls background enrichment and browser-side
+  remote artwork fallbacks. Turn it off for cached-only browsing; stored/manual artwork still
+  renders, and explicit refresh/retry remains available when network policy permits.
+- **Scan interval (seconds)** persists in app data; `0` means manual-only scanning. The Compose
+  interval is the initial default, not an instruction to erase saved settings on restart.
+
+Settings, source-revision/hash caches, identification outcomes and downloaded artwork live
+under writable `/app/data`, never in the read-only collection. Turning automatic downloads
+off does not delete cached artwork or reset the database. The environment variable
+`RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED=false` is a separate hard ceiling:
+automatic and explicit provider requests are disabled, regardless of the saved switch.
+Emulator core downloads are separate from metadata policy; this is not a fully offline bundle.
+
+Matching uses the existing upstream identification service and content MD5 where it is safe
+to identify one supported payload (including a single-ROM ZIP). Filename matching remains a
+fallback, not proof of content identity. Ambiguous archives, multi-file sets, hacks and
+variants may remain unmatched or have no cover; no universal matching, source conversion,
+renaming, or new emulator/core support is promised. See [the detailed behavior and limits](../docs/mounted-library.md).
 
 ## Pull, update and rollback
 

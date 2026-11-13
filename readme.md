@@ -43,6 +43,10 @@ The published target is **linux/amd64**, not a universal platform/core compatibi
 - [Deployment, all Compose environment options, updates and digest rollback](deploy/README.md).
 - [GitHub-hosted source builds, test/publish workflow, manual triggers and safe upstream merges](deploy/README.md#github-hosted-builds-and-publication).
 - [Mounted-library behavior and compatibility limits](docs/mounted-library.md).
+- **Settings → ROM / Metadata** separates file scans, explicit metadata refresh and missing-cover
+  retries. Automatic downloads can be disabled for cached-only browsing without deleting artwork.
+  **Enabled Platforms → Enable platforms with ROMs** uses indexed counts, including disabled platforms.
+  [Control details and persistent cache/network policy](deploy/README.md#rom-indexing-and-metadata-controls).
 
 No local image archive, task tooling, private collection, credentials, or app data is needed
 to recover or rebuild this fork. The self-hosting instructions below describe upstream;
