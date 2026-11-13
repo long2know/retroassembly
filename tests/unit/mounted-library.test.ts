@@ -3,6 +3,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { link, mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, it, type TestContext } from 'node:test'
+import { setTimeout as delay } from 'node:timers/promises'
+import { Uint8ArrayReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js'
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { Hono } from 'hono'
@@ -34,6 +36,7 @@ import {
 } from '#@/utils/server/mounted-files.ts'
 import { setMountedLibrary } from '#@/utils/server/mounted-library-runtime.ts'
 import { createMountedLibrary } from '#@/utils/server/mounted-library.ts'
+import { getMountedIdentification } from '#@/utils/server/mounted-identification.ts'
 import { cacheMountedCover, enrichMountedRom, getMountedCoverUrl } from '#@/utils/server/mounted-metadata.ts'
 import { createFilesystemStorage, createStorage } from '#@/utils/server/storage.ts'
 import { createSupabase } from '#@/utils/server/supabase.ts'
@@ -135,7 +138,7 @@ async function sourceSnapshot(root: string, relative = '') {
   return result
 }
 
-async function fixture(t: TestContext, files: Record<string, string> = defaultFiles) {
+async function fixture(t: TestContext, files: Record<string, string | Uint8Array> = defaultFiles) {
   const root = path.resolve('tests/.mounted-library-fixtures', randomUUID())
   const connections: ReturnType<typeof createDrizzle>['library'][] = []
   t.after(async () => {
@@ -211,6 +214,55 @@ async function fixture(t: TestContext, files: Record<string, string> = defaultFi
   }
 
   return { bios, configuration, data, library, list, mounted, request, roms, root, storage }
+}
+
+const mountedStatusResponse = z.object({
+  automaticMetadataEnabled: z.boolean(),
+  indexed: z.number(),
+  metadata: z.object({
+    errors: z.number(),
+    operation: z.enum(['metadata', 'artwork']).optional(),
+    processed: z.number(),
+    running: z.boolean(),
+    total: z.number(),
+  }),
+  networkAllowed: z.boolean(),
+  platforms: z.array(z.object({ indexed: z.number(), platform: z.string(), unsupported: z.number() })),
+  settings: z.object({ automaticMetadata: z.boolean(), scanIntervalSeconds: z.number() }),
+  unsupported: z.number(),
+})
+
+async function createSyntheticZip(files: Record<string, string | Uint8Array>) {
+  const writer = new ZipWriter(new Uint8ArrayWriter(), { useWebWorkers: false })
+  for (const [filename, value] of Object.entries(files)) {
+    const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value
+    await writer.add(filename, new Uint8ArrayReader(bytes), { directory: filename.endsWith('/'), level: 0 })
+  }
+  return await writer.close()
+}
+
+async function getIdentifyInput(input: Parameters<typeof fetch>[0], init?: RequestInit) {
+  const request = input instanceof Request ? input.clone() : new Request(input, init)
+  return z.object({ files: z.array(z.object({ md5: z.string().optional(), name: z.string() })), platform: z.string() }).parse(await request.json())
+}
+
+function enableFixtureMetadata(f: Awaited<ReturnType<typeof fixture>>) {
+  process.env.RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED = 'true'
+  f.mounted.stop()
+  const mounted = createMountedLibrary(f.library, { ...f.configuration, metadataEnabled: true })
+  setMountedLibrary(mounted)
+  return mounted
+}
+
+async function finishMetadataJob(mounted: ReturnType<typeof createMountedLibrary>) {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const status = mounted.getStatus()
+    if (!status.metadata.running) {
+      return status
+    }
+    await delay(10)
+  }
+  assert.fail('Mounted metadata job did not finish')
 }
 
 await describe('mounted shared library', async () => {
@@ -568,7 +620,7 @@ await describe('mounted shared library', async () => {
 
   await it('persists enrichment failures, permits explicit retries/manual matches, and refuses unsafe art responses', async (t) => {
     const f = await fixture(t)
-    process.env.RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED = 'true'
+    enableFixtureMetadata(f)
     const [rom] = await f.library.select().from(romTable)
     let matches: unknown[] = []
     let imageType = 'text/html'
@@ -590,6 +642,8 @@ await describe('mounted shared library', async () => {
     await assert.rejects(enrichMountedRom(f.library, rom))
     const [failed] = await f.library.select().from(romTable)
     assert.equal(failed.mountedSource?.metadata, 'error')
+    assert.equal(failed.mountedSource?.metadataOutcome, 'no-match')
+    assert.ok(failed.mountedSource?.identification?.md5)
     assert.ok(failed.mountedSource?.metadataError)
     await f.library.update(romTable).set({ gameDeveloper: 'Stale provider developer' }).where(eq(romTable.id, rom.id))
     matches = [{ launchbox: { databaseId: 7, name: 'Manually matched game' } }]
@@ -677,5 +731,291 @@ await describe('mounted shared library', async () => {
     assert.equal(getMountedFormat('psx', '.iso')?.supported, false)
     assert.equal(getMountedFormat('psx', '.bin')?.supported, false)
     assert.equal(resolveMountedPlatform('shadps4'), undefined)
+  })
+
+  await it('hashes the original ZIP cartridge payload, uses canonical art names, and reuses persisted negative-art and digest caches without source access', async (t) => {
+    const payload = new Uint8Array([0x4e, 0x45, 0x53, 0x1a, 0x01, 0x00, 0x31, 0x72, 0x19, 0xa5])
+    const zip = await createSyntheticZip({
+      'docs/': '',
+      'docs/readme.txt': 'Original synthetic identification fixture',
+      '__MACOSX/._Pulse.nes': 'Ignored resource fork',
+      'cartridge/Inner Lantern.nes': payload,
+    })
+    const f = await fixture(t, { 'roms/NES/Circuit Lantern (Demo) [p1][!].zip': zip })
+    process.env.RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED = 'true'
+    const md5 = createHash('md5').update(payload).digest('hex')
+    assert.notEqual(md5, createHash('md5').update(zip).digest('hex'))
+    const before = await sourceSnapshot(f.roms)
+    const [rom] = await f.library.select().from(romTable)
+    const inputs: Awaited<ReturnType<typeof getIdentifyInput>>[] = []
+    const covers: URL[] = []
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
+      const url = getFetchUrl(input)
+      if (url.origin === 'https://metadata.fixture.invalid') {
+        const body = await getIdentifyInput(input, init)
+        inputs.push(body)
+        assert.equal(body.platform, 'nes')
+        assert.deepEqual(body.files, [{ md5, name: 'Circuit Lantern (Demo) [p1][!].zip' }])
+        return Response.json([{ launchbox: { name: 'Circuit Lantern' }, libretro: { id: 'synthetic-lantern', md5, name: 'Circuit Lantern (World)' } }])
+      }
+      assert.equal(url.origin, 'https://thumbnails.libretro.com')
+      covers.push(url)
+      return new Response('No artwork for this canonical name', { status: 404 })
+    })
+    const identified = await enrichMountedRom(f.library, rom)
+    assert.equal(identified.gameName, 'Circuit Lantern')
+    assert.equal(identified.mountedSource?.metadata, 'ready')
+    assert.equal(identified.mountedSource?.metadataOutcome, 'matched')
+    assert.equal(identified.mountedSource?.metadataError, undefined)
+    assert.equal(identified.mountedSource?.artwork, 'missing')
+    assert.equal(identified.mountedSource?.artworkError, undefined)
+    assert.equal(identified.gameBoxartFileIds, null)
+    assert.equal(identified.mountedSource?.identification?.mode, 'zip-entry')
+    assert.equal(identified.mountedSource?.identification?.payloadName, 'cartridge/Inner Lantern.nes')
+    assert.equal(identified.mountedSource?.identification?.md5, md5)
+    assert.equal(identified.mountedSource?.identification?.bytes, payload.byteLength)
+    assert.equal(identified.mountedSource?.identification?.confidence, 'content')
+    assert.ok(identified.mountedSource?.identification?.hashedAt)
+    assert.deepEqual(covers.map((url) => decodeURIComponent(url.pathname).split('/').at(-1)), ['Circuit Lantern (World).png', 'Circuit Lantern.png'])
+    assert.deepEqual(await sourceSnapshot(f.roms), before)
+    const detached = path.join(f.root, 'offline-source')
+    await rename(f.roms, detached)
+    try {
+      const repeated = await enrichMountedRom(f.library, identified)
+      assert.deepEqual(repeated.mountedSource?.identification, identified.mountedSource?.identification)
+      assert.equal(repeated.mountedSource?.artworkAttemptedAt, identified.mountedSource?.artworkAttemptedAt)
+      assert.equal(inputs.length, 2)
+      assert.equal(covers.length, 2)
+      const response = await expectStatus(f.request('/mounted-library'), 200)
+      assert.equal(mountedStatusResponse.parse(await response.json()).indexed, 1)
+    } finally {
+      await rename(detached, f.roms)
+    }
+    assert.deepEqual(await sourceSnapshot(f.roms), before)
+  })
+
+  await it('selects system-eligible ZIP content, rejects ambiguous, unsafe, oversized and excessive-entry archives, and preserves arcade sets', async (t) => {
+    const cartridge = new Uint8Array([0x91, 0x08, 0x23, 0x55])
+    const single = await createSyntheticZip({ 'readme.txt': 'Not a ROM', '__MACOSX/._chip.bin': 'Junk', 'payload/chip.bin': cartridge })
+    const multiple = await createSyntheticZip({ 'one.nes': cartridge, 'two.nes': new Uint8Array([1, 2, 3]) })
+    const arcade = await createSyntheticZip({ 'cpu-one.bin': cartridge, 'cpu-two.bin': new Uint8Array([4, 5, 6]) })
+    const unsafe = Buffer.from(await createSyntheticZip({ 'safe.nes': cartridge }))
+    const safeName = Buffer.from('safe.nes')
+    for (let offset = unsafe.indexOf(safeName); offset >= 0; offset = unsafe.indexOf(safeName, offset + safeName.length)) {
+      unsafe.set(Buffer.from('../x.nes'), offset)
+    }
+    const excessiveFiles: Record<string, string | Uint8Array> = { 'payload.nes': cartridge }
+    for (let index = 0; index < 256; index += 1) {
+      excessiveFiles[`notes/${index}.txt`] = 'x'
+    }
+    const oversized = Buffer.from(await createSyntheticZip({ 'large.nes': cartridge }))
+    const central = oversized.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]))
+    assert.ok(central >= 0)
+    oversized.writeUInt32LE(101 * 1024 * 1024, central + 24)
+    const f = await fixture(t, {
+      'roms/atari2600/Tagged.zip': single,
+      'roms/NES/Multiple.zip': multiple,
+      'roms/NES/Unsafe.zip': unsafe,
+      'roms/NES/TooMany.zip': await createSyntheticZip(excessiveFiles),
+      'roms/NES/Oversized.zip': oversized,
+      'roms/arcade/Set.zip': arcade,
+    })
+    const rows = await f.library.select().from(romTable)
+    const identified = new Map<string, Awaited<ReturnType<typeof getMountedIdentification>>>()
+    for (const rom of rows) {
+      identified.set(rom.fileName, await getMountedIdentification(rom, f.configuration.roms))
+    }
+    assert.equal(identified.get('Tagged.zip')?.mode, 'zip-entry')
+    assert.equal(identified.get('Tagged.zip')?.md5, createHash('md5').update(cartridge).digest('hex'))
+    assert.equal(identified.get('Tagged.zip')?.payloadName, 'payload/chip.bin')
+    assert.match(identified.get('Multiple.zip')?.error || '', /multiple eligible ROM payloads/u)
+    assert.match(identified.get('Unsafe.zip')?.error || '', /Invalid mounted source path/u)
+    assert.match(identified.get('TooMany.zip')?.error || '', /more than 256 entries/u)
+    assert.match(identified.get('Oversized.zip')?.error || '', /expanded size/u)
+    for (const filename of ['Multiple.zip', 'Unsafe.zip', 'TooMany.zip', 'Oversized.zip']) {
+      assert.equal(identified.get(filename)?.mode, 'ambiguous')
+      assert.equal(identified.get(filename)?.md5, undefined)
+    }
+    assert.equal(identified.get('Set.zip')?.mode, 'arcade-set')
+    assert.equal(identified.get('Set.zip')?.payloadName, undefined)
+    assert.equal(identified.get('Set.zip')?.md5, createHash('md5').update(arcade).digest('hex'))
+    process.env.RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED = 'true'
+    t.mock.method(globalThis, 'fetch', async () => { throw new Error('Ambiguous archives must not issue automatic provider requests') })
+    const ambiguous = rows.find((rom) => rom.fileName === 'Multiple.zip')
+    assert.ok(ambiguous)
+    await assert.rejects(enrichMountedRom(f.library, ambiguous), /multiple eligible ROM payloads/u)
+    const [persisted] = await f.library.select().from(romTable).where(eq(romTable.id, ambiguous.id))
+    assert.equal(persisted.mountedSource?.identification?.mode, 'ambiguous')
+    assert.equal(persisted.mountedSource?.metadataOutcome, 'error')
+  })
+
+  await it('persists app-wide controls and reports all available platform counts independently of enabled choices without walking sources', async (t) => {
+    const f = await fixture(t, {
+      'roms/NES/Primary.nes': 'Original NES fixture',
+      'roms/SFC/Secondary.sfc': 'Original SNES fixture',
+      'roms/ps1/Unsupported.cue': 'Original unsupported disc descriptor',
+    })
+    await expectStatus(f.request('/preference', { body: JSON.stringify({ ui: { platforms: ['nes'] } }), headers: { 'Content-Type': 'application/json' }, method: 'POST' }), 200)
+    const updated = await expectStatus(f.request('/mounted-library', {
+      body: JSON.stringify({ automaticMetadata: false, scanIntervalSeconds: 17 }),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'PATCH',
+    }), 200)
+    const status = mountedStatusResponse.parse(await updated.json())
+    assert.deepEqual(status.settings, { automaticMetadata: false, scanIntervalSeconds: 17 })
+    assert.deepEqual(status.platforms, [
+      { indexed: 1, platform: 'nes', unsupported: 0 },
+      { indexed: 1, platform: 'psx', unsupported: 1 },
+      { indexed: 1, platform: 'snes', unsupported: 0 },
+    ])
+    assert.equal(status.indexed, 3)
+    assert.equal(status.unsupported, 1)
+    const detached = path.join(f.root, 'offline-for-counts')
+    await rename(f.roms, detached)
+    try {
+      const counts = await expectStatus(f.request('/mounted-library'), 200)
+      assert.deepEqual(mountedStatusResponse.parse(await counts.json()).platforms, status.platforms)
+      f.mounted.stop()
+      const restarted = createMountedLibrary(f.library, f.configuration)
+      setMountedLibrary(restarted)
+      assert.deepEqual(restarted.getStatus().settings, status.settings)
+      assert.deepEqual(restarted.getStatus().platforms, status.platforms)
+    } finally {
+      await rename(detached, f.roms)
+    }
+    await expectStatus(f.request('/mounted-library', { body: JSON.stringify({ scanIntervalSeconds: -1 }), headers: { 'Content-Type': 'application/json' }, method: 'PATCH' }), 400)
+    const [hidden] = await f.library.select().from(romTable).where(eq(romTable.platform, 'snes'))
+    await f.library.update(romTable).set({ status: 0 }).where(eq(romTable.id, hidden.id))
+    const response = await expectStatus(f.request('/mounted-library'), 200)
+    assert.equal(mountedStatusResponse.parse(await response.json()).platforms.some((platform) => platform.platform === 'snes'), false)
+    const [unhashed] = await f.library.select().from(romTable).where(eq(romTable.platform, 'nes'))
+    assert.equal(unhashed.mountedSource?.identification, undefined)
+  })
+
+  await it('allows explicit coalesced metadata and artwork jobs with automatic lookup off while preserving manual edits, associations and unchanged hashes', async (t) => {
+    const f = await fixture(t, { 'roms/NES/Manual.nes': 'Original manual fixture', 'roms/NES/Automatic.nes': 'Original automatic fixture' })
+    const mounted = enableFixtureMetadata(f)
+    const rows = await f.library.select().from(romTable)
+    const manual = rows.find((rom) => rom.fileName === 'Manual.nes')
+    const automatic = rows.find((rom) => rom.fileName === 'Automatic.nes')
+    assert.ok(manual?.mountedSource)
+    assert.ok(automatic)
+    await f.library.update(romTable).set({ gameName: 'Manually corrected title', gameBoxartFileIds: 'attachments/alice/custom.png', mountedSource: { ...manual.mountedSource, metadata: 'manual' } }).where(eq(romTable.id, manual.id))
+    await f.library.insert(favoriteTable).values({ romId: manual.id, userId: 'alice' })
+    await f.library.insert(launchRecordTable).values({ core: 'fceumm', platform: 'nes', romId: manual.id, userId: 'alice' })
+    await f.library.insert(stateTable).values({ core: 'fceumm', fileId: 'states/alice/synthetic', platform: 'nes', romId: manual.id, thumbnailFileId: 'states/alice/synthetic.png', type: 'manual', userId: 'alice' })
+    let providers = 0
+    let covers = 0
+    let artworkAvailable = false
+    t.mock.method(globalThis, 'fetch', async (input, init) => {
+      const url = getFetchUrl(input)
+      if (url.origin === 'https://metadata.fixture.invalid') {
+        providers += 1
+        const body = await getIdentifyInput(input, init)
+        assert.equal(body.files[0]?.name, 'Automatic.nes')
+        assert.equal(body.files[0]?.md5, createHash('md5').update('Original automatic fixture').digest('hex'))
+        await delay(20)
+        return Response.json([{ libretro: { id: 'automatic-fixture', md5: body.files[0]?.md5, name: 'Automatic canonical (World)' } }])
+      }
+      assert.equal(url.origin, 'https://thumbnails.libretro.com')
+      covers += 1
+      return artworkAvailable ? new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { headers: { 'Content-Type': 'image/png' } }) : new Response('Missing art', { status: 404 })
+    })
+    const settings = await expectStatus(f.request('/mounted-library', { body: JSON.stringify({ automaticMetadata: false, scanIntervalSeconds: 0 }), headers: { 'Content-Type': 'application/json' }, method: 'PATCH' }), 200)
+    const initial = mountedStatusResponse.parse(await settings.json())
+    assert.equal(initial.networkAllowed, true)
+    assert.equal(initial.automaticMetadataEnabled, false)
+    const action = { body: JSON.stringify({}), headers: { 'Content-Type': 'application/json' }, method: 'POST' }
+    const concurrent = await Promise.all([f.request('/mounted-library/metadata', action), f.request('/mounted-library/metadata', action)])
+    for (const response of concurrent) {
+      assert.equal(response.status, 200)
+      const job = mountedStatusResponse.parse(await response.json())
+      assert.equal(job.metadata.operation, 'metadata')
+      assert.equal(job.metadata.total, 1)
+    }
+    const finished = await finishMetadataJob(mounted)
+    assert.equal(finished.metadata.errors, 0)
+    assert.equal(finished.metadata.processed, 1)
+    assert.equal(providers, 1)
+    assert.equal(covers, 1)
+    const [identified] = await f.library.select().from(romTable).where(eq(romTable.id, automatic.id))
+    assert.equal(identified.mountedSource?.artwork, 'missing')
+    const cached = identified.mountedSource?.identification
+    assert.ok(cached?.hashedAt)
+    artworkAvailable = true
+    await expectStatus(f.request('/mounted-library/artwork', action), 200)
+    await finishMetadataJob(mounted)
+    assert.equal(providers, 1)
+    assert.equal(covers, 2)
+    const [withArt] = await f.library.select().from(romTable).where(eq(romTable.id, automatic.id))
+    assert.equal(withArt.mountedSource?.artwork, 'ready')
+    assert.match(withArt.gameBoxartFileIds || '', /^metadata\//u)
+    assert.deepEqual(withArt.mountedSource?.identification, cached)
+    await expectStatus(f.request('/mounted-library/metadata', { ...action, body: JSON.stringify({ platform: 'nes' }) }), 200)
+    await finishMetadataJob(mounted)
+    assert.equal(providers, 2)
+    assert.equal(covers, 2)
+    await expectStatus(f.request('/mounted-library', { method: 'POST' }), 200)
+    await delay(10)
+    const [unchanged] = await f.library.select().from(romTable).where(eq(romTable.id, automatic.id))
+    assert.deepEqual(unchanged.mountedSource?.identification, cached)
+    assert.equal(providers, 2)
+    const [preserved] = await f.library.select().from(romTable).where(eq(romTable.id, manual.id))
+    assert.equal(preserved.id, manual.id)
+    assert.equal(preserved.gameName, 'Manually corrected title')
+    assert.equal(preserved.gameBoxartFileIds, 'attachments/alice/custom.png')
+    assert.equal(preserved.mountedSource?.metadata, 'manual')
+    assert.equal(preserved.mountedSource?.identification, undefined)
+    assert.equal((await f.library.select().from(favoriteTable))[0].romId, manual.id)
+    assert.equal((await f.library.select().from(launchRecordTable))[0].romId, manual.id)
+    assert.equal((await f.library.select().from(stateTable))[0].romId, manual.id)
+    const restarted = createMountedLibrary(f.library, { ...f.configuration, metadataEnabled: true })
+    setMountedLibrary(restarted)
+    restarted.start()
+    await delay(10)
+    assert.equal(restarted.getStatus().settings.automaticMetadata, false)
+    assert.equal(restarted.getStatus().metadata.running, false)
+    assert.equal(providers, 2)
+  })
+
+  await it('keeps server network disable as a hard ceiling for every explicit action and preserves settings against unauthenticated writes', async (t) => {
+    const f = await fixture(t)
+    let requests = 0
+    t.mock.method(globalThis, 'fetch', async () => { requests += 1; throw new Error('Server policy must prohibit provider requests') })
+    const patch = { body: JSON.stringify({ automaticMetadata: true }), headers: { 'Content-Type': 'application/json' }, method: 'PATCH' }
+    const setting = await expectStatus(f.request('/mounted-library', patch), 200)
+    const status = mountedStatusResponse.parse(await setting.json())
+    assert.equal(status.settings.automaticMetadata, true)
+    assert.equal(status.networkAllowed, false)
+    assert.equal(status.automaticMetadataEnabled, false)
+    const [rom] = await f.library.select().from(romTable)
+    const action = { body: JSON.stringify({}), headers: { 'Content-Type': 'application/json' }, method: 'POST' }
+    for (const endpoint of ['/mounted-library/metadata', '/mounted-library/artwork', `/roms/${rom.id}/identify`]) {
+      await expectStatus(f.request(endpoint, action), 403)
+    }
+    const anonymous = await f.request('/mounted-library', { ...patch, body: JSON.stringify({ automaticMetadata: false }) }, '')
+    assert.notEqual(anonymous.status, 200)
+    assert.equal(f.mounted.getStatus().settings.automaticMetadata, true)
+    assert.equal(requests, 0)
+    const [unmodified] = await f.library.select().from(romTable)
+    assert.equal(unmodified.mountedSource?.identification, undefined)
+  })
+
+  await it('preserves unexpected artwork HTTP failures separately from valid identification instead of misclassifying them as missing art', async (t) => {
+    const f = await fixture(t)
+    process.env.RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED = 'true'
+    t.mock.method(globalThis, 'fetch', async (input) => {
+      const url = getFetchUrl(input)
+      if (url.origin === 'https://metadata.fixture.invalid') {
+        return Response.json([{ libretro: { id: 'synthetic-art-error', name: 'Art error fixture' } }])
+      }
+      return new Response('Provider unavailable', { status: 503 })
+    })
+    const [rom] = await f.library.select().from(romTable)
+    const identified = await enrichMountedRom(f.library, rom)
+    assert.equal(identified.mountedSource?.metadata, 'ready')
+    assert.equal(identified.mountedSource?.metadataError, undefined)
+    assert.equal(identified.mountedSource?.artwork, 'error')
+    assert.match(identified.mountedSource?.artworkError || '', /HTTP 503/u)
   })
 })

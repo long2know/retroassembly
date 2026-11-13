@@ -13,7 +13,7 @@ native saves.
 | `RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY`         | `false` | Hide uploaded games and reject new ROM uploads while mounted sources are enabled.                                                                    |
 | `RETROASSEMBLY_RUN_TIME_SHARED_ROM_DIRECTORY`        | empty   | Required absolute, existing ROM root when enabled.                                                                                                   |
 | `RETROASSEMBLY_RUN_TIME_SHARED_BIOS_DIRECTORY`       | empty   | Optional absolute, existing BIOS root.                                                                                                               |
-| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_SCAN_INTERVAL`    | `300`   | Seconds between completed scans, from `0` to `86400`; `0` disables periodic scans, not the startup scan.                                             |
+| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_SCAN_INTERVAL`    | `300`   | Initial seconds between completed scans (`0` to `86400`); `0` is manual-only after startup. Persisted app settings take precedence after first initialization.                                             |
 | `RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED` | `true`  | Allow provider identification and cover caching. `false` disables automatic and explicit provider requests; manual metadata/art editing still works. |
 
 Use read-only mounts for both sources. Writable data and storage roots retain
@@ -70,8 +70,32 @@ Authenticated API endpoints:
 - `GET /api/v1/roms/:id/content`: original ROM bytes.
 - `GET /api/v1/files/:encodedFileId`: authorized ROM, BIOS, art, or private state
   bytes; encode the complete opaque file ID as one URL component.
-- `GET /api/v1/mounted-library`: last scan status, errors, counts, BIOS warnings.
-- `POST /api/v1/mounted-library`: rescan, preserving previous rows on failure.
+- `GET /api/v1/mounted-library`: scan status, errors, BIOS warnings, persisted
+  `settings: { automaticMetadata, scanIntervalSeconds }`, `networkAllowed`,
+  effective `automaticMetadataEnabled`, `platforms: [{ platform, indexed,
+  unsupported }]`, and metadata job progress (`running`, `operation`,
+  `processed`, `total`, `errors`, timestamps, optional error). Counts come only
+  from available, non-hidden indexed rows across all platforms; saved enabled
+  platform choices do not filter these counts. Unsupported counts are not an
+  emulator-readiness claim. This endpoint never walks or hashes source files.
+- `PATCH /api/v1/mounted-library`: JSON `{ "automaticMetadata": false,
+  "scanIntervalSeconds": 0 }` (either field may be omitted). Settings are
+  application-wide and persist in SQLite across restarts. Scan intervals are
+  integer seconds from `0` to `86400`; `0` disables periodic scans, not the
+  startup reconciliation. Environment values seed new settings, not upgrades.
+- `POST /api/v1/mounted-library`: reconcile source folders, preserving previous
+  rows on partial or failed scans. This retains the existing no-body contract.
+- `POST /api/v1/mounted-library/metadata`: JSON `{ "platform": "nes",
+  "retryArtwork": false }` (both optional). Explicitly re-identify all available
+  non-manual rows, including earlier misses and filename-only matches, using
+  cached hashes for unchanged revisions. `retryArtwork` intentionally retries
+  earlier artwork misses/errors; otherwise those negative results remain cached.
+- `POST /api/v1/mounted-library/artwork`: JSON `{ "platform": "nes" }` (optional
+  scope) retries artwork independently, without walking, hashing or requesting
+  ROM identification again. Existing cached/custom art and manual rows remain
+  untouched. Metadata/artwork jobs coalesce while one runs and return status
+  immediately; poll GET for progress. Client-supplied filesystem paths and
+  provider URLs are not accepted.
 - `POST /api/v1/roms/:id/identify`: retry/match with JSON `{ "name": "Game name" }`,
   or a `launchboxId`/`libretroId`. Provider failures are persisted and retryable.
 - Existing ROM `PATCH`, artwork, favorites, history, and state APIs also work
@@ -102,19 +126,61 @@ responsibility; indexing a supported extension is not a compatibility guarantee.
 
 ## Metadata and covers
 
-Automatic enrichment uses upstream msleuth providers and runs separately from
-startup scanning/request handling, in sequential batches of at most 50 games.
-Pending batches drain in the background; identification failures back off at
-least five minutes before periodic retries. Cover failures retain identification
-and surface a warning for explicit retries. Per-game metadata errors and scan/enrichment failures
-are visible in records/logs, and manual retries use the identification endpoint.
-Provider access depends on network availability and provider usage policies;
-there is no unlimited/free scraping guarantee.
+Identification uses the installed msleuth SDK and its existing platform-scoped
+Libretro MD5 matching followed by ROM-name, No-Intro/GoodTools-aware filename,
+and LaunchBox alternate-name matching. Normal cartridge files are hashed in
+bounded chunks. Non-arcade ZIPs are inspected through a random-access reader;
+only one safe, system-eligible cartridge payload is hashed, never compressed
+archive bytes or an arbitrary first entry. Directories, documentation and macOS
+resource forks are excluded. Atari cartridge and Mega Drive `.bin` payloads are
+accepted according to their existing upstream cores. Arcade ZIPs remain complete
+sets: no member is chosen as the game's content identity. Set/core compatibility
+is not established by identification.
 
-Identification records persist in the app database. Cached covers persist below
-`storage/metadata/`; manually supplied art below `storage/attachments/`.
-ROM identification uses the original basename, not bulk content hashing;
-ambiguous matches can be corrected without renaming files.
+Inspection permits at most 100 MiB of source/payload data, 256 archive entries,
+100 MiB total declared expansion, a 1000:1 expansion ratio and 4 MiB random-read
+ranges. Actual streamed output is bounded and CRC-checked. Ambiguous multi-ROM,
+unsafe-path, duplicate-path, encrypted or oversized ZIPs persist a precise error
+without automatic provider guessing; an explicit manual name/ID match remains
+possible. Oversized files, unsupported formats and disc containers (including
+CHD) are filename-only: container hashes are not disc-track catalog hashes.
+No universal header stripping, byte swapping, hack/overdump repair, disc
+extraction, source conversion, core additions or credentials are introduced.
+Exact identity depends on a provider catalog containing the same payload bytes.
+
+`mountedSource.identification` persists algorithm version, source revision,
+input name, selected payload name, MD5, size, hash timestamp and match confidence
+in the app database. A content-confidence result requires the returned Libretro
+MD5 to equal the submitted digest; otherwise matching is explicitly filename
+confidence. Precise Libretro identity is retained even when a canonical base-game
+name supplies artwork. Provider outcomes (`matched`, `no-match`, `error`) and
+metadata/artwork timestamps persist separately. Cached negative outcomes and
+unchanged hashes survive restart and explicit metadata refresh. Browsing,
+settings counts and artwork-only retries do not walk or rehash disks. A successful
+source rescan invalidates hashes only for changed fingerprints, including when
+manual metadata itself is retained. Manual metadata, custom art, hidden flags,
+ROM IDs, favorites, history and state associations are not replaced by bulk jobs.
+
+Automatic enrichment runs separately from startup scanning and request handling,
+sequentially with a pause between batches of 50. Metadata failures back off at
+least five minutes before periodic automatic retries. Turning automatic lookup
+off persists and prevents new automatic provider/cover work while preserving all
+cached/manual data. Explicit metadata/artwork actions still work when automatic
+lookup is off, unless the server environment network policy is disabled; that
+hard ceiling returns `403` for explicit provider actions. The loader exposes the
+same status snapshot as `mountedLibrary` for cached-only client initialization.
+The server environment flag remains the network ceiling, not the UI preference.
+
+Artwork first uses the provider's canonical Libretro name, then an available
+canonical LaunchBox title, without blindly stripping meaningful title text.
+An HTTP `404` persists `artwork: "missing"`, not a ROM-identification failure,
+and is not retried automatically on browsing or rescans. Other HTTP failures,
+timeouts and unsafe image responses persist `artwork: "error"` with the actual
+error/status; valid metadata remains ready. Some identified variants simply
+have no artwork, and a missing cover does not mean that a ROM is invalid.
+Cached covers persist below `storage/metadata/`; manually supplied art below
+`storage/attachments/`. Source folders receive no index, image or digest sidecars.
+
 Cover URLs are generated only for the existing Libretro thumbnail provider,
 never accepted as arbitrary host/file URLs. Redirects, non-image content types,
 and images larger than 10 MiB are rejected. No media or index sidecars are
