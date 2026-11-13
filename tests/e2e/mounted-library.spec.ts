@@ -53,6 +53,18 @@ function inspectAppFile(container: string, fileId: string) {
   )
 }
 
+function providerMatches(providerContainer: string) {
+  const logs = execFileSync('docker', ['logs', providerContainer], { encoding: 'utf8' }).trim()
+  const records: { matched: boolean; method: string }[] = logs
+    ? logs.split('\n').map(function parseRecord(line) {
+        return JSON.parse(line)
+      })
+    : []
+  return records.filter(function matched(record) {
+    return record.method === 'POST' && record.matched
+  }).length
+}
+
 test('mounted sources remain immutable through content matching, settings, browser play and two restarts', async ({
   page,
 }) => {
@@ -71,18 +83,6 @@ test('mounted sources remain immutable through content matching, settings, brows
       preferenceWrites += 1
     }
   })
-
-  function providerMatches(providerContainer: string) {
-    const logs = execFileSync('docker', ['logs', providerContainer], { encoding: 'utf8' }).trim()
-    const records: { matched: boolean; method: string }[] = logs
-      ? logs.split('\n').map(function parseRecord(line) {
-          return JSON.parse(line)
-        })
-      : []
-    return records.filter(function matched(record) {
-      return record.method === 'POST' && record.matched
-    }).length
-  }
 
   async function mountedStatus() {
     const response = await page.request.get('/api/v1/mounted-library')
