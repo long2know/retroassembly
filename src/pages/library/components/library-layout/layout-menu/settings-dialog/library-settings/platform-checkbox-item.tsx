@@ -4,7 +4,14 @@ import type { Platform } from '#@/constants/platform.ts'
 import { usePreference } from '#@/pages/library/hooks/use-preference.ts'
 import { getPlatformIcon } from '#@/utils/client/library.ts'
 
-export function PlatformCheckboxItem({ disabled, platform }: Readonly<{ disabled: boolean; platform: Platform }>) {
+interface PlatformCheckboxItemProps {
+  disabled: boolean
+  indexed?: number
+  platform: Platform
+  unsupported?: number
+}
+
+export function PlatformCheckboxItem({ disabled, indexed, platform, unsupported }: Readonly<PlatformCheckboxItemProps>) {
   const { t } = useTranslation()
   const { isLoading, preference, update } = usePreference()
 
@@ -24,6 +31,9 @@ export function PlatformCheckboxItem({ disabled, platform }: Readonly<{ disabled
 
   return (
     <CheckboxCards.Item
+      aria-describedby={indexed === undefined ? undefined : `platform-status-${platform.name}`}
+      aria-label={t(platform.displayNameI18nKey)}
+      data-testid={`platform-option-${platform.name}`}
       disabled={isLoading || disabled}
       key={platform.name}
       onClick={handleClick}
@@ -31,12 +41,26 @@ export function PlatformCheckboxItem({ disabled, platform }: Readonly<{ disabled
     >
       <div className='flex items-center gap-2 text-xs'>
         <img
-          alt={t(platform.displayNameI18nKey)}
+          alt=''
           className='size-6 rounded object-contain object-center'
           loading='lazy'
           src={getPlatformIcon(platform.name)}
         />
-        {t(platform.displayNameI18nKey)}
+        <div>
+          <div>{t(platform.displayNameI18nKey)}</div>
+          {indexed === undefined ? null : (
+            <div className='mt-1 text-[11px] opacity-70' id={`platform-status-${platform.name}`}>
+              <div data-testid={`platform-count-${platform.name}`}>
+                {t('mountedLibrary.indexedCount', { count: indexed })}
+              </div>
+              {unsupported ? (
+                <div data-testid={`platform-unsupported-${platform.name}`}>
+                  {t('mountedLibrary.unsupportedCount', { count: unsupported })}
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
       </div>
     </CheckboxCards.Item>
   )

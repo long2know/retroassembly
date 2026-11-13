@@ -1,7 +1,7 @@
 import { uniq } from 'es-toolkit'
+import { useEffect, useRef } from 'react'
 import useSWRImmutable from 'swr/immutable'
 import type { Rom } from '#@/controllers/roms/get-roms.ts'
-import { useGlobalLoaderData } from '#@/pages/hooks/use-global-loader-data.ts'
 import { imageLoaded } from '#@/utils/client/image.ts'
 import {
   getDemoRomThumbnail,
@@ -11,16 +11,29 @@ import {
 } from '#@/utils/client/library.ts'
 import { getFileUrl } from '../utils/file.ts'
 import { useIsDemo } from './use-demo.ts'
+import { useMountedLibrary } from './use-mounted-library.ts'
 
 const libretroThumbnailTypes = ['boxart', 'title', 'snap'] as const
 export function useRomCover(rom: Rom) {
   const isDemo = useIsDemo()
-  const { env } = useGlobalLoaderData()
-  const offline = rom.mountedSource && env.RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED !== 'true'
-  const romCovers: string[] = []
+  const { automaticMetadataEnabled } = useMountedLibrary()
+  const remoteCoversEnabled = !rom.mountedSource || automaticMetadataEnabled
+  const remoteCoversEnabledRef = useRef(remoteCoversEnabled)
+  const cachedRomCovers = rom.gameBoxartFileIds
+    ? rom.gameBoxartFileIds.split(',').filter(Boolean).map((fileId) => getFileUrl(fileId))
+    : []
+
+  useEffect(() => {
+    remoteCoversEnabledRef.current = remoteCoversEnabled
+    return () => {
+      remoteCoversEnabledRef.current = false
+    }
+  }, [remoteCoversEnabled])
+
+  const romCovers = [...cachedRomCovers]
   if (isDemo) {
     romCovers.push(getDemoRomThumbnail(rom))
-  } else if (!offline) {
+  } else if (remoteCoversEnabled) {
     romCovers.push(
       ...libretroThumbnailTypes.map((type) => getRomLibretroThumbnail(rom, type, 'libretro')),
       ...libretroThumbnailTypes.map((type) => getRomLibretroThumbnail(rom, type, 'jsdelivr')),
@@ -42,18 +55,21 @@ export function useRomCover(rom: Rom) {
       ),
     )
   }
-  if (rom.gameBoxartFileIds) {
-    romCovers.unshift(...rom.gameBoxartFileIds.split(',').map((fileId) => getFileUrl(fileId)))
-  }
   const uniqueRomCovers = uniq(romCovers).filter(Boolean)
   const platformCover = getPlatformGameIcon(rom.platform)
   const covers = [...uniqueRomCovers, platformCover]
 
   return useSWRImmutable(covers, async () => {
     for (const romCover of uniqueRomCovers) {
+      const cached = cachedRomCovers.includes(romCover)
+      if (!cached && !remoteCoversEnabledRef.current) {
+        continue
+      }
       try {
         await imageLoaded(romCover)
-        return { src: romCover, type: 'rom' }
+        if (cached || remoteCoversEnabledRef.current) {
+          return { src: romCover, type: 'rom' }
+        }
       } catch {}
     }
     return { src: platformCover, type: 'platform' }

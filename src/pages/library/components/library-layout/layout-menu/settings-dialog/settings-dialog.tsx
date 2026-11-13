@@ -1,15 +1,18 @@
 import { Button, Dialog, ScrollArea, Tabs } from '@radix-ui/themes'
 import { clsx } from 'clsx'
 import { useTranslation } from 'react-i18next'
+import { useGlobalLoaderData } from '#@/pages/hooks/use-global-loader-data.ts'
 import { useSettingsDialogTabName } from '#@/pages/library/atoms.ts'
 import { DialogRoot } from '../../../dialog-root.tsx'
 import { EmulatingSettings } from './emulating-settings/emulating-settings.tsx'
 import { GeneralSettings } from './general-settings/general-settings.tsx'
 import { InputsSettings } from './inputs-settings/inputs-setting.tsx'
 import { LibrarySettings } from './library-settings/library-settings.tsx'
+import { RomMetadataSettings } from './rom-metadata-settings.tsx'
 
 const settingsTabs = [
   { content: LibrarySettings, iconClass: 'icon-[mdi--bookshelf]', name: 'library' },
+  { content: RomMetadataSettings, iconClass: 'icon-[mdi--database-sync]', name: 'romMetadata' },
   { content: InputsSettings, iconClass: 'icon-[mdi--controller]', name: 'inputs' },
   { content: EmulatingSettings, iconClass: 'icon-[simple-icons--retroarch]', name: 'emulating' },
   { content: GeneralSettings, iconClass: 'icon-[mdi--cog]', name: 'general' },
@@ -17,8 +20,12 @@ const settingsTabs = [
 
 export function SettingsDialog({ onOpenChange, ...props }: Readonly<Dialog.RootProps>) {
   const { t } = useTranslation()
+  const { env } = useGlobalLoaderData()
   const [tabName, setTabName] = useSettingsDialogTabName()
-  const { content: TabContent } = settingsTabs.find((tab) => tab.name === tabName) || settingsTabs[0]
+  const availableTabs = settingsTabs.filter(
+    (tab) => tab.name !== 'romMetadata' || env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY === 'true',
+  )
+  const { content: TabContent, name: activeTabName } = availableTabs.find((tab) => tab.name === tabName) || availableTabs[0]
 
   function handleOpenChange(open: boolean) {
     onOpenChange?.(open)
@@ -37,10 +44,10 @@ export function SettingsDialog({ onOpenChange, ...props }: Readonly<Dialog.RootP
         </Dialog.Title>
 
         <div>
-          <Tabs.Root asChild onValueChange={handleValueChange} value={tabName}>
+          <Tabs.Root asChild onValueChange={handleValueChange} value={activeTabName}>
             <div>
-              <Tabs.List>
-                {settingsTabs.map(({ iconClass, name }) => (
+              <Tabs.List className='overflow-x-auto'>
+                {availableTabs.map(({ iconClass, name }) => (
                   <Tabs.Trigger key={name} value={name}>
                     <span className={clsx('mr-2 size-5', iconClass)} />
                     <span className='text-lg capitalize'>{t(`settings.${name}`)}</span>
@@ -48,13 +55,13 @@ export function SettingsDialog({ onOpenChange, ...props }: Readonly<Dialog.RootP
                 ))}
               </Tabs.List>
 
-              <div className='h-[60vh]'>
+              <Tabs.Content className='h-[60vh]' value={activeTabName}>
                 <ScrollArea size='2'>
-                  <div className='motion-preset-slide-up-sm p-4' key={tabName}>
+                  <div className='motion-preset-slide-up-sm p-4' key={activeTabName}>
                     <TabContent />
                   </div>
                 </ScrollArea>
-              </div>
+              </Tabs.Content>
             </div>
           </Tabs.Root>
         </div>
