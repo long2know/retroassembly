@@ -26,7 +26,14 @@ export async function updateRom(rom: {
     .set({
       ...rom,
       ...(existingRom.mountedSource
-        ? { mountedSource: { ...existingRom.mountedSource, metadata: 'manual', metadataError: undefined } }
+        ? {
+            mountedSource: {
+              ...existingRom.mountedSource,
+              metadata: 'manual',
+              metadataError: undefined,
+              ...(Object.hasOwn(rom, 'gameBoxartFileIds') ? { artwork: 'manual' as const, artworkError: undefined } : {}),
+            },
+          }
         : {}),
     })
     .where(eq(romTable.id, id))

@@ -36,6 +36,12 @@ class MountedZipReader extends Reader<FileHandle> {
 class MountedHashWriter extends Writer<string> {
   private hash = createHash('md5')
   private written = 0
+  private expected: number
+
+  constructor(expected: number) {
+    super()
+    this.expected = expected
+  }
 
   override writeUint8Array(data: Uint8Array) {
     this.written += data.byteLength
@@ -46,6 +52,9 @@ class MountedHashWriter extends Writer<string> {
   }
 
   override getData() {
+    if (this.written !== this.expected) {
+      throw new Error('ZIP payload size disagrees with its directory entry')
+    }
     return this.hash.digest('hex')
   }
 }
@@ -97,15 +106,15 @@ async function identifyZip(handle: FileHandle, size: number, platform: PlatformN
         throw new Error('ZIP contains duplicate paths or symbolic links')
       }
       names.add(entry.filename)
+      expanded += entry.uncompressedSize
+      if (!Number.isSafeInteger(expanded) || expanded > contentLimit || entry.uncompressedSize / Math.max(1, entry.compressedSize) > 1000) {
+        throw new Error('ZIP expanded size or compression ratio exceeds identification limits')
+      }
       if (entry.filename.split('/').some((segment) => segment.startsWith('.') || segment === '__MACOSX')) {
         continue
       }
       if (entry.encrypted) {
         throw new Error('Encrypted ZIP entries cannot be identified safely')
-      }
-      expanded += entry.uncompressedSize
-      if (!Number.isSafeInteger(expanded) || expanded > contentLimit || entry.uncompressedSize / Math.max(1, entry.compressedSize) > 1000) {
-        throw new Error('ZIP expanded size or compression ratio exceeds identification limits')
       }
       if (!extensions.has(path.posix.extname(entry.filename).toLowerCase())) {
         continue
@@ -121,7 +130,7 @@ async function identifyZip(handle: FileHandle, size: number, platform: PlatformN
     if (!candidate.uncompressedSize) {
       throw new Error('ZIP ROM payload is empty')
     }
-    const md5 = await candidate.getData(new MountedHashWriter(), {
+    const md5 = await candidate.getData(new MountedHashWriter(candidate.uncompressedSize), {
       checkSignature: true,
       chunkSize,
       signal: AbortSignal.timeout(30_000),

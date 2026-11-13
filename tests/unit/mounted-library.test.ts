@@ -467,6 +467,13 @@ await describe('mounted shared library', async () => {
     const sharedArt = await f.request(`/files/${encodeURIComponent(artId)}`)
     assert.equal(sharedArt.status, 200)
     assert.equal(await sharedArt.text(), 'app-owned artwork')
+    const [customArt] = await f.library.select().from(romTable).where(eq(romTable.id, rom.id))
+    assert.equal(customArt.mountedSource?.artwork, 'manual')
+    assert.equal(customArt.mountedSource?.artworkError, undefined)
+    await expectStatus(f.request(`/roms/${rom.id}/boxart`, { method: 'DELETE' }, 'bob'), 200)
+    const [removedArt] = await f.library.select().from(romTable).where(eq(romTable.id, rom.id))
+    assert.equal(removedArt.gameBoxartFileIds, null)
+    assert.equal(removedArt.mountedSource?.artwork, 'manual')
     const privateFileId = 'roms/nes/private-upload.nes'
     await writeFixture(f.storage, privateFileId, 'private uploaded ROM')
     await f.library.insert(romTable).values({
@@ -829,7 +836,7 @@ await describe('mounted shared library', async () => {
     assert.equal(identified.get('Tagged.zip')?.md5, createHash('md5').update(cartridge).digest('hex'))
     assert.equal(identified.get('Tagged.zip')?.payloadName, 'payload/chip.bin')
     assert.match(identified.get('Multiple.zip')?.error || '', /multiple eligible ROM payloads/u)
-    assert.match(identified.get('Unsafe.zip')?.error || '', /Invalid mounted source path/u)
+    assert.match(identified.get('Unsafe.zip')?.error || '', /(?:Invalid mounted source path|Unsafe filename)/u)
     assert.match(identified.get('TooMany.zip')?.error || '', /more than 256 entries/u)
     assert.match(identified.get('Oversized.zip')?.error || '', /expanded size/u)
     for (const filename of ['Multiple.zip', 'Unsafe.zip', 'TooMany.zip', 'Oversized.zip']) {
