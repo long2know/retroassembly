@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
 import path from 'node:path'
-import { and, eq, isNotNull, isNull } from 'drizzle-orm'
+import { and, count, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
-import { getMountedFormat, resolveMountedPlatform, type MountedSource } from '#@/constants/mounted-library.ts'
+import { getRunTimeEnv } from '#@/constants/env.ts'
+import { getMountedFormat, resolveMountedPlatform, type MountedLibrarySettings, type MountedMetadataProgress, type MountedSource } from '#@/constants/mounted-library.ts'
 import { platformMap, type PlatformName } from '#@/constants/platform.ts'
-import { romTable, statusEnum } from '#@/databases/schema.ts'
+import { mountedLibrarySettingsTable, romTable, statusEnum } from '#@/databases/schema.ts'
 import type { createDrizzle } from './drizzle.ts'
 import {
   assertMountedRootAvailable,
@@ -26,16 +27,37 @@ import {
 } from './mounted-library-runtime.ts'
 
 type Library = ReturnType<typeof createDrizzle>['library']
+type ScanSnapshot = Omit<MountedScanStatus, 'settings' | 'networkAllowed' | 'automaticMetadataEnabled' | 'platforms' | 'metadata'>
+
+interface MetadataJobOptions {
+  automatic?: boolean
+  platform?: PlatformName
+  retryArtwork?: boolean
+  retryErrors?: boolean
+}
 
 export function createMountedLibrary(library: Library, configuration: MountedConfiguration) {
+  library
+    .insert(mountedLibrarySettingsTable)
+    .values({ id: 1, automaticMetadata: configuration.metadataEnabled, scanIntervalSeconds: configuration.scanInterval, updatedAt: new Date() })
+    .onConflictDoNothing()
+    .run()
+  const persistedSettings = library.select().from(mountedLibrarySettingsTable).where(eq(mountedLibrarySettingsTable.id, 1)).get()
+  if (!persistedSettings) {
+    throw new Error('Mounted library settings could not be loaded')
+  }
+  let settings: MountedLibrarySettings = {
+    automaticMetadata: persistedSettings.automaticMetadata,
+    scanIntervalSeconds: persistedSettings.scanIntervalSeconds,
+  }
+  let metadata: MountedMetadataProgress = { errors: 0, processed: 0, running: false, total: 0 }
   let bioses: Partial<Record<PlatformName, MountedBios[]>> = {}
   let biosFiles = new Map<string, { path: string; revision: string }>()
   let scanning: Promise<MountedScanStatus> | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let metadataTimer: ReturnType<typeof setTimeout> | undefined
   let stopped = false
-  let enriching = false
-  let status: MountedScanStatus = {
+  let status: ScanSnapshot = {
     biosCount: 0,
     indexed: 0,
     running: false,
@@ -118,7 +140,8 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
           platform,
           source: {
             available: true,
-            metadata: configuration.metadataEnabled ? 'pending' : 'disabled',
+            artwork: automaticMetadataEnabled() ? 'pending' : 'disabled',
+            metadata: automaticMetadataEnabled() ? 'pending' : 'disabled',
             path: relative,
             revision,
             unsupportedReason: format.unsupportedReason,
@@ -162,7 +185,7 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
             const mountedSource =
               replaced && previous.metadata !== 'manual'
                 ? item.source
-                : { ...previous, available: true, revision: item.source.revision }
+                : { ...previous, available: true, revision: item.source.revision, ...(replaced ? { identification: undefined } : {}) }
             transaction
               .update(romTable)
               .set({
@@ -221,7 +244,7 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
       for (const warning of status.warnings) {
         console.warn(`Mounted library: ${warning}`)
       }
-      return structuredClone(status)
+      return getStatus()
     } catch (error) {
       status = {
         ...status,
@@ -311,9 +334,130 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
     }
   }
 
-  async function drainMetadata() {
-    metadataTimer = undefined
-    await enrichPending(false)
+  function networkAllowed() {
+    return configuration.metadataEnabled && getRunTimeEnv().RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED === 'true'
+  }
+
+  function automaticMetadataEnabled() {
+    return settings.automaticMetadata && networkAllowed()
+  }
+
+  function visibleMountedCondition(platform?: PlatformName) {
+    return and(
+      eq(romTable.status, statusEnum.normal),
+      isNull(romTable.userId),
+      isNotNull(romTable.mountedSource),
+      sql`json_extract(${romTable.mountedSource}, '$.available') = 1`,
+      platform ? eq(romTable.platform, platform) : undefined,
+    )
+  }
+
+  function getStatus(): MountedScanStatus {
+    const platforms = library
+      .select({
+        indexed: count(),
+        platform: romTable.platform,
+        unsupported: sql<number>`sum(CASE WHEN json_extract(${romTable.mountedSource}, '$.unsupportedReason') IS NOT NULL THEN 1 ELSE 0 END)`,
+      })
+      .from(romTable)
+      .where(visibleMountedCondition())
+      .groupBy(romTable.platform)
+      .orderBy(romTable.platform)
+      .all()
+    const unavailable = library
+      .select({ count: count() })
+      .from(romTable)
+      .where(and(eq(romTable.status, statusEnum.normal), isNull(romTable.userId), isNotNull(romTable.mountedSource), sql`json_extract(${romTable.mountedSource}, '$.available') = 0`))
+      .get()?.count || 0
+    let indexed = 0
+    let unsupported = 0
+    for (const platform of platforms) {
+      indexed += platform.indexed
+      unsupported += platform.unsupported
+    }
+    return structuredClone({ ...status, automaticMetadataEnabled: automaticMetadataEnabled(), indexed, metadata, networkAllowed: networkAllowed(), platforms, settings, unavailable, unsupported })
+  }
+
+  function selectMetadataJob(operation: 'metadata' | 'artwork', options: MetadataJobOptions) {
+    const automatic = options.automatic
+      ? sql`(
+          json_extract(${romTable.mountedSource}, '$.metadata') IN ('pending', 'disabled')
+          OR (${options.retryErrors === false ? 0 : 1} = 1
+            AND json_extract(${romTable.mountedSource}, '$.metadata') = 'error'
+            AND coalesce(json_extract(${romTable.mountedSource}, '$.metadataAttemptedAt'), 0) < ${Date.now() - 300_000})
+        )`
+      : undefined
+    const candidates = library
+      .select({ id: romTable.id })
+      .from(romTable)
+      .where(and(
+        visibleMountedCondition(options.platform),
+        sql`json_extract(${romTable.mountedSource}, '$.metadata') != 'manual'`,
+        automatic,
+        operation === 'artwork' ? and(isNull(romTable.gameBoxartFileIds), isNotNull(romTable.gameName)) : undefined,
+      ))
+      .orderBy(romTable.id)
+      .all()
+    metadata = { errors: 0, lastStartedAt: new Date().toISOString(), operation, processed: 0, running: true, total: candidates.length }
+    return candidates
+  }
+
+  async function runMetadataJob(operation: 'metadata' | 'artwork', options: MetadataJobOptions, candidates: { id: string }[]) {
+    try {
+      const { enrichMountedRom, retryMountedArtwork } = await import('./mounted-metadata.ts')
+      for (const candidate of candidates) {
+        if (stopped || !networkAllowed() || (options.automatic && !automaticMetadataEnabled())) {
+          break
+        }
+        const rom = library.select().from(romTable).where(and(eq(romTable.id, candidate.id), visibleMountedCondition(options.platform))).get()
+        if (!rom || rom.mountedSource?.metadata === 'manual') {
+          metadata.processed += 1
+          continue
+        }
+        try {
+          const updated = operation === 'artwork'
+            ? await retryMountedArtwork(library, rom)
+            : await enrichMountedRom(library, rom, undefined, {
+                allowArtwork: options.automatic ? automaticMetadataEnabled : undefined,
+                retryArtwork: options.retryArtwork,
+                root: configuration.roms,
+              })
+          if (updated.mountedSource?.artwork === 'error') {
+            metadata.errors += 1
+          }
+        } catch (error) {
+          metadata.errors += 1
+          metadata.error = error instanceof Error ? error.message : String(error)
+        }
+        metadata.processed += 1
+        if (metadata.processed % 50 === 0 && metadata.processed < metadata.total) {
+          await new Promise(function pause(resolve) { setTimeout(resolve, 1000) })
+        }
+      }
+    } catch (error) {
+      metadata.error = error instanceof Error ? error.message : String(error)
+      console.error('Mounted metadata job failed:', error)
+    } finally {
+      metadata.running = false
+      metadata.lastFinishedAt = new Date().toISOString()
+    }
+  }
+
+  function startMetadataJob(operation: 'metadata' | 'artwork', options: MetadataJobOptions = {}) {
+    if (!networkAllowed()) {
+      throw new HTTPException(403, { message: 'Mounted metadata network access is disabled by server policy' })
+    }
+    if (metadata.running) {
+      return getStatus()
+    }
+    clearTimeout(metadataTimer)
+    const candidates = selectMetadataJob(operation, options)
+    metadataTimer = setTimeout(async function explicitMetadata() {
+      metadataTimer = undefined
+      await runMetadataJob(operation, options, candidates)
+    }, 0)
+    metadataTimer.unref()
+    return getStatus()
   }
 
   async function beginMetadata() {
@@ -322,29 +466,27 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
   }
 
   function scheduleEnrichment() {
-    if (configuration.metadataEnabled && !stopped && !enriching && !metadataTimer) {
+    if (automaticMetadataEnabled() && !stopped && !metadata.running && !metadataTimer) {
       metadataTimer = setTimeout(beginMetadata, 0)
       metadataTimer.unref()
     }
   }
 
   async function enrichPending(retryErrors = true) {
-    if (!configuration.metadataEnabled || enriching || stopped) {
+    if (!automaticMetadataEnabled() || metadata.running || stopped) {
       return
     }
-    enriching = true
-    let more = false
-    try {
-      const { enrichMountedRoms } = await import('./mounted-metadata.ts')
-      more = await enrichMountedRoms(library, retryErrors)
-    } catch (error) {
-      console.error('Mounted library metadata enrichment failed; retry with the metadata API:', error)
-    } finally {
-      enriching = false
-      if (more && !stopped) {
-        metadataTimer = setTimeout(drainMetadata, 1000)
-        metadataTimer.unref()
-      }
+    const options: MetadataJobOptions = { automatic: true, retryErrors }
+    const candidates = selectMetadataJob('metadata', options)
+    await runMetadataJob('metadata', options, candidates)
+  }
+
+  function scheduleScan() {
+    clearTimeout(timer)
+    timer = undefined
+    if (!stopped && settings.scanIntervalSeconds) {
+      timer = setTimeout(tick, settings.scanIntervalSeconds * 1000)
+      timer.unref()
     }
   }
 
@@ -353,13 +495,26 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
       await scan()
       scheduleEnrichment()
     } catch {
-      // The scan records the failure and preserves the previous index.
+      // A failed or partial traversal preserves the previous index and records the error.
     } finally {
-      if (!stopped && configuration.scanInterval) {
-        timer = setTimeout(tick, configuration.scanInterval * 1000)
-        timer.unref()
-      }
+      scheduleScan()
     }
+  }
+
+  function updateSettings(update: Partial<MountedLibrarySettings>) {
+    const next = { ...settings, ...update }
+    if (typeof next.automaticMetadata !== 'boolean' || !Number.isSafeInteger(next.scanIntervalSeconds) || next.scanIntervalSeconds < 0 || next.scanIntervalSeconds > 86_400) {
+      throw new HTTPException(400, { message: 'Invalid mounted library settings' })
+    }
+    library.update(mountedLibrarySettingsTable).set({ ...next, updatedAt: new Date() }).where(eq(mountedLibrarySettingsTable.id, 1)).run()
+    settings = next
+    scheduleScan()
+    if (!settings.automaticMetadata && !metadata.running) {
+      clearTimeout(metadataTimer)
+      metadataTimer = undefined
+    }
+    scheduleEnrichment()
+    return getStatus()
   }
 
   async function assertWritableDirectory(directory: string) {
@@ -378,26 +533,34 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
     getBioses(platform: PlatformName) {
       return structuredClone(bioses[platform] || [])
     },
-    getStatus() {
-      return structuredClone(status)
-    },
+    getStatus,
     async identify(rom: typeof romTable.$inferSelect, match: MountedMetadataMatch) {
+      if (!networkAllowed()) {
+        throw new HTTPException(403, { message: 'Mounted metadata network access is disabled by server policy' })
+      }
       const { enrichMountedRom } = await import('./mounted-metadata.ts')
-      return await enrichMountedRom(library, rom, match)
+      return await enrichMountedRom(library, rom, match, { retryArtwork: true, root: configuration.roms })
     },
     readFile,
+    refreshMetadata(options: { platform?: PlatformName; retryArtwork?: boolean } = {}) {
+      return startMetadataJob('metadata', options)
+    },
+    retryArtwork(options: { platform?: PlatformName } = {}) {
+      return startMetadataJob('artwork', options)
+    },
     scan,
+    updateSettings,
     scheduleEnrichment,
     start() {
       stopped = false
       scheduleEnrichment()
-      if (configuration.scanInterval && !timer) {
-        timer = setTimeout(tick, configuration.scanInterval * 1000)
-        timer.unref()
-      }
+      scheduleScan()
     },
     stop() {
       stopped = true
+      if (metadataTimer) {
+        metadata.running = false
+      }
       clearTimeout(timer)
       clearTimeout(metadataTimer)
       timer = undefined

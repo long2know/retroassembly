@@ -187,6 +187,9 @@ export const roms = new Hono()
       try {
         return c.json(await library.identify(rom, c.req.valid('json')))
       } catch (error) {
+        if (error instanceof HTTPException) {
+          throw error
+        }
         throw new HTTPException(502, {
           cause: error,
           message: error instanceof Error ? error.message : 'Metadata provider failed; retry or edit manually',
