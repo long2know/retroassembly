@@ -201,6 +201,7 @@ test('mounted sources remain immutable through content matching, settings, brows
     .toBe('Archive Pulse — content metadata')
   await metadataIdle()
   const archive = await findArchive()
+  expect(archive.mountedSource).toMatchObject({ metadata: 'ready', metadataOutcome: 'matched' })
   expect(archive.mountedSource.identification).toMatchObject({
     confidence: 'content',
     md5: process.env.RETROASSEMBLY_MOUNTED_TEST_ZIP_CONTENT_MD5,
@@ -361,7 +362,7 @@ test('mounted sources remain immutable through content matching, settings, brows
   const automaticResponse = page.waitForResponse(function automaticSaved(response) {
     return new URL(response.url()).pathname === '/api/v1/mounted-library' && response.request().method() === 'PATCH'
   })
-  await automatic.uncheck()
+  await automatic.click()
   expect((await automaticResponse).status()).toBe(200)
   await expect(automatic).not.toBeChecked()
   expect(await mountedStatus()).toMatchObject({

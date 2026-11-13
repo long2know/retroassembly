@@ -53,9 +53,9 @@ jobs:
       - name: Formatting, lint and types with no warnings
         run: |
           mkdir -p node_modules/.cache/ci
+          trap 'git diff --binary > node_modules/.cache/ci/source-formatting.patch' EXIT
           pnpm vp check --fix 2>&1 | tee node_modules/.cache/ci/source-check.log
           grep -F 'Found no warnings, lint errors, or type errors' node_modules/.cache/ci/source-check.log
-          git diff --binary > node_modules/.cache/ci/source-formatting.patch
           git diff --exit-code
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build linux/amd64 production image
