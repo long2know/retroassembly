@@ -31,7 +31,9 @@ export async function updateRom(rom: {
               ...existingRom.mountedSource,
               metadata: 'manual',
               metadataError: undefined,
-              ...(Object.hasOwn(rom, 'gameBoxartFileIds') ? { artwork: 'manual' as const, artworkError: undefined } : {}),
+              ...(Object.hasOwn(rom, 'gameBoxartFileIds')
+                ? { artwork: 'manual' as const, artworkError: undefined }
+                : {}),
             },
           }
         : {}),

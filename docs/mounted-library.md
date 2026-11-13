@@ -7,14 +7,14 @@ native saves.
 
 ## Runtime configuration
 
-| Environment variable                                 | Default | Meaning                                                                                                                                              |
-| ---------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY`   | `false` | Enable mounted sources in Node. Workers retain uploaded-library behavior.                                                                            |
-| `RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY`         | `false` | Hide uploaded games and reject new ROM uploads while mounted sources are enabled.                                                                    |
-| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_DIRECTORY`        | empty   | Required absolute, existing ROM root when enabled.                                                                                                   |
-| `RETROASSEMBLY_RUN_TIME_SHARED_BIOS_DIRECTORY`       | empty   | Optional absolute, existing BIOS root.                                                                                                               |
-| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_SCAN_INTERVAL`    | `300`   | Initial seconds between completed scans (`0` to `86400`); `0` is manual-only after startup. Persisted app settings take precedence after first initialization.                                             |
-| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED` | `true`  | Allow provider identification and cover caching. `false` disables automatic and explicit provider requests; manual metadata/art editing still works. |
+| Environment variable                                 | Default | Meaning                                                                                                                                                        |
+| ---------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY`   | `false` | Enable mounted sources in Node. Workers retain uploaded-library behavior.                                                                                      |
+| `RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY`         | `false` | Hide uploaded games and reject new ROM uploads while mounted sources are enabled.                                                                              |
+| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_DIRECTORY`        | empty   | Required absolute, existing ROM root when enabled.                                                                                                             |
+| `RETROASSEMBLY_RUN_TIME_SHARED_BIOS_DIRECTORY`       | empty   | Optional absolute, existing BIOS root.                                                                                                                         |
+| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_SCAN_INTERVAL`    | `300`   | Initial seconds between completed scans (`0` to `86400`); `0` is manual-only after startup. Persisted app settings take precedence after first initialization. |
+| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED` | `true`  | Allow provider identification and cover caching. `false` disables automatic and explicit provider requests; manual metadata/art editing still works.           |
 
 Use read-only mounts for both sources. Writable data and storage roots retain
 their upstream runtime settings and must be disjoint from each source, including

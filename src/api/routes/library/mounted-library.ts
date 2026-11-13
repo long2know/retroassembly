@@ -53,13 +53,9 @@ export const mountedLibrary = new Hono()
       })
     }
   })
-  .post(
-    'metadata',
-    zValidator('json', metadataScope.extend({ retryArtwork: z.boolean().optional() })),
-    (c) => c.json(requireMetadataNetwork().refreshMetadata(c.req.valid('json'))),
+  .post('metadata', zValidator('json', metadataScope.extend({ retryArtwork: z.boolean().optional() })), (c) =>
+    c.json(requireMetadataNetwork().refreshMetadata(c.req.valid('json'))),
   )
-  .post(
-    'artwork',
-    zValidator('json', metadataScope),
-    (c) => c.json(requireMetadataNetwork().retryArtwork(c.req.valid('json'))),
+  .post('artwork', zValidator('json', metadataScope), (c) =>
+    c.json(requireMetadataNetwork().retryArtwork(c.req.valid('json'))),
   )

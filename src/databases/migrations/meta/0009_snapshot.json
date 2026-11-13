@@ -54,28 +54,17 @@
       "indexes": {
         "idx_favorites_user_rom": {
           "name": "idx_favorites_user_rom",
-          "columns": [
-            "user_id",
-            "rom_id"
-          ],
+          "columns": ["user_id", "rom_id"],
           "isUnique": true
         },
         "idx_favorites_user_status_created": {
           "name": "idx_favorites_user_status_created",
-          "columns": [
-            "user_id",
-            "status",
-            "created_at"
-          ],
+          "columns": ["user_id", "status", "created_at"],
           "isUnique": false
         },
         "idx_favorites_user_rom_status": {
           "name": "idx_favorites_user_rom_status",
-          "columns": [
-            "user_id",
-            "rom_id",
-            "status"
-          ],
+          "columns": ["user_id", "rom_id", "status"],
           "isUnique": false
         }
       },
@@ -148,12 +137,7 @@
       "indexes": {
         "idx_launch_records_user_status_platform": {
           "name": "idx_launch_records_user_status_platform",
-          "columns": [
-            "user_id",
-            "status",
-            "platform",
-            "created_at"
-          ],
+          "columns": ["user_id", "status", "platform", "created_at"],
           "isUnique": false
         }
       },
@@ -219,17 +203,12 @@
       "indexes": {
         "idx_oidc_identities_issuer_subject": {
           "name": "idx_oidc_identities_issuer_subject",
-          "columns": [
-            "issuer",
-            "subject"
-          ],
+          "columns": ["issuer", "subject"],
           "isUnique": true
         },
         "idx_oidc_identities_user": {
           "name": "idx_oidc_identities_user",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": true
         }
       },
@@ -407,62 +386,37 @@
       "indexes": {
         "idx_roms_user_status_platform": {
           "name": "idx_roms_user_status_platform",
-          "columns": [
-            "user_id",
-            "status",
-            "platform"
-          ],
+          "columns": ["user_id", "status", "platform"],
           "isUnique": false
         },
         "idx_roms_user_status_created": {
           "name": "idx_roms_user_status_created",
-          "columns": [
-            "user_id",
-            "status",
-            "created_at"
-          ],
+          "columns": ["user_id", "status", "created_at"],
           "isUnique": false
         },
         "idx_roms_user_status_released": {
           "name": "idx_roms_user_status_released",
-          "columns": [
-            "user_id",
-            "status",
-            "game_release_date"
-          ],
+          "columns": ["user_id", "status", "game_release_date"],
           "isUnique": false
         },
         "idx_roms_user_status_name": {
           "name": "idx_roms_user_status_name",
-          "columns": [
-            "user_id",
-            "status",
-            "file_name"
-          ],
+          "columns": ["user_id", "status", "file_name"],
           "isUnique": false
         },
         "idx_roms_file_status": {
           "name": "idx_roms_file_status",
-          "columns": [
-            "file_id",
-            "status"
-          ],
+          "columns": ["file_id", "status"],
           "isUnique": false
         },
         "idx_roms_user_platform_filename": {
           "name": "idx_roms_user_platform_filename",
-          "columns": [
-            "user_id",
-            "platform",
-            "file_name"
-          ],
+          "columns": ["user_id", "platform", "file_name"],
           "isUnique": false
         },
         "idx_roms_mounted_file": {
           "name": "idx_roms_mounted_file",
-          "columns": [
-            "file_id"
-          ],
+          "columns": ["file_id"],
           "isUnique": true,
           "where": "\"roms\".\"user_id\" IS NULL"
         }
@@ -558,17 +512,12 @@
       "indexes": {
         "sessions_token_unique": {
           "name": "sessions_token_unique",
-          "columns": [
-            "token"
-          ],
+          "columns": ["token"],
           "isUnique": true
         },
         "idx_sessions_user": {
           "name": "idx_sessions_user",
-          "columns": [
-            "user_id",
-            "status"
-          ],
+          "columns": ["user_id", "status"],
           "isUnique": false
         }
       },
@@ -662,29 +611,17 @@
       "indexes": {
         "idx_states_rom_status": {
           "name": "idx_states_rom_status",
-          "columns": [
-            "rom_id",
-            "status",
-            "created_at"
-          ],
+          "columns": ["rom_id", "status", "created_at"],
           "isUnique": false
         },
         "idx_states_user_status": {
           "name": "idx_states_user_status",
-          "columns": [
-            "user_id",
-            "status"
-          ],
+          "columns": ["user_id", "status"],
           "isUnique": false
         },
         "idx_states_user_rom_status_type": {
           "name": "idx_states_user_rom_status_type",
-          "columns": [
-            "user_id",
-            "rom_id",
-            "status",
-            "type"
-          ],
+          "columns": ["user_id", "rom_id", "status", "type"],
           "isUnique": false
         }
       },
@@ -764,9 +701,7 @@
       "indexes": {
         "idx_user_preferences": {
           "name": "idx_user_preferences",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         }
       },
@@ -847,9 +782,7 @@
       "indexes": {
         "idx_users_username": {
           "name": "idx_users_username",
-          "columns": [
-            "username"
-          ],
+          "columns": ["username"],
           "isUnique": false
         }
       },

@@ -16,9 +16,13 @@ type Library = ReturnType<typeof createDrizzle>['library']
 type MountedRom = typeof romTable.$inferSelect
 
 interface EnrichmentOptions {
-  root?: MountedRoot
-  retryArtwork?: boolean
   allowArtwork?: () => boolean
+  launchboxId?: number
+  libretroId?: string
+  manual?: boolean
+  name?: string
+  retryArtwork?: boolean
+  root?: MountedRoot
 }
 
 const nullableString = z.string().nullish()
@@ -51,7 +55,9 @@ const metadataSchema = z.object({
     .nullish(),
 })
 
-class NoProviderMatchError extends Error {}
+class NoProviderMatchError extends Error {
+  override name = 'NoProviderMatchError'
+}
 
 function assertNetworkAllowed() {
   if (getRunTimeEnv().RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED !== 'true') {
@@ -62,7 +68,10 @@ function assertNetworkAllowed() {
 async function requestMetadata(parameter: { identify: IdentifyParameter } | { query: QueryParameter }) {
   assertNetworkAllowed()
   const env = getRunTimeEnv()
-  const hosts = [env.RETROASSEMBLY_RUN_TIME_MSLEUTH_HOST, ...env.RETROASSEMBLY_RUN_TIME_MSLEUTH_FALLBACK_HOST.split(',')].filter(Boolean)
+  const hosts = [
+    env.RETROASSEMBLY_RUN_TIME_MSLEUTH_HOST,
+    ...env.RETROASSEMBLY_RUN_TIME_MSLEUTH_FALLBACK_HOST.split(','),
+  ].filter(Boolean)
   const signal = AbortSignal.timeout(15_000)
   let lastError: unknown = new Error('No metadata provider is configured')
   for (const host of hosts) {
@@ -165,12 +174,27 @@ async function resolveArtwork(rom: MountedRom, metadata: z.infer<typeof metadata
   }
   if (rom.gameBoxartFileIds) {
     const manual = rom.gameBoxartFileIds.split(',').some((id) => !id.startsWith('metadata/'))
-    return { artwork: manual ? 'manual' as const : 'ready' as const, artworkError: undefined, gameBoxartFileIds: rom.gameBoxartFileIds }
+    return {
+      artwork: manual ? ('manual' as const) : ('ready' as const),
+      artworkError: undefined,
+      gameBoxartFileIds: rom.gameBoxartFileIds,
+    }
   }
-  if ((!options.retryArtwork && (source.artwork === 'missing' || source.artwork === 'error')) || options.allowArtwork?.() === false) {
-    return { artwork: source.artwork || 'pending', artworkError: source.artworkError, gameBoxartFileIds: rom.gameBoxartFileIds }
+  if (
+    (!options.retryArtwork && (source.artwork === 'missing' || source.artwork === 'error')) ||
+    options.allowArtwork?.() === false
+  ) {
+    return {
+      artwork: source.artwork || 'pending',
+      artworkError: source.artworkError,
+      gameBoxartFileIds: rom.gameBoxartFileIds,
+    }
   }
-  const names = [...new Set([metadata.libretro?.name, metadata.launchbox?.name, rom.gameName].filter((name): name is string => Boolean(name)))]
+  const names = [
+    ...new Set(
+      [metadata.libretro?.name, metadata.launchbox?.name, rom.gameName].filter((name): name is string => Boolean(name)),
+    ),
+  ]
   const artworkAttemptedAt = Date.now()
   try {
     for (const name of names) {
@@ -179,7 +203,12 @@ async function resolveArtwork(rom: MountedRom, metadata: z.infer<typeof metadata
         return { artwork: 'ready' as const, artworkAttemptedAt, artworkError: undefined, gameBoxartFileIds: id }
       }
     }
-    return { artwork: 'missing' as const, artworkAttemptedAt, artworkError: undefined, gameBoxartFileIds: rom.gameBoxartFileIds }
+    return {
+      artwork: 'missing' as const,
+      artworkAttemptedAt,
+      artworkError: undefined,
+      gameBoxartFileIds: rom.gameBoxartFileIds,
+    }
   } catch (error) {
     const artworkError = error instanceof Error ? error.message : String(error)
     console.warn(`Mounted artwork request failed: ${artworkError}`)
@@ -190,13 +219,14 @@ async function resolveArtwork(rom: MountedRom, metadata: z.infer<typeof metadata
 export async function enrichMountedRom(
   library: Library,
   rom: MountedRom,
-  match?: { launchboxId?: number; libretroId?: string; name?: string },
   options: EnrichmentOptions = {},
 ) {
   if (!rom.mountedSource?.available) {
     throw new Error('Mounted source is unavailable')
   }
   assertNetworkAllowed()
+  const match =
+    options.manual || options.launchboxId || options.libretroId || options.name ? options : undefined
   if (rom.mountedSource.metadata === 'manual' && !match) {
     return rom
   }
@@ -218,17 +248,29 @@ export async function enrichMountedRom(
     if (identification.mode === 'ambiguous' && !match) {
       throw new Error(identification.error || 'Ambiguous ZIP requires an explicit manual metadata match')
     }
-    const results = match?.launchboxId || match?.libretroId
-      ? await requestMetadata({ query: { conditions: [{ launchboxId: match.launchboxId, libretroId: match.libretroId }] } })
-      : await requestMetadata({ identify: { files: [{ md5: match ? undefined : identification.md5, name: match?.name || identification.name }], platform: rom.platform } })
+    const results =
+      match?.launchboxId || match?.libretroId
+        ? await requestMetadata({
+            query: { conditions: [{ launchboxId: match.launchboxId, libretroId: match.libretroId }] },
+          })
+        : await requestMetadata({
+            identify: {
+              files: [{ md5: match ? undefined : identification.md5, name: match?.name || identification.name }],
+              platform: rom.platform,
+            },
+          })
     if (!results?.[0]) {
-      throw new NoProviderMatchError('No provider match was found; edit the app metadata or retry with a different name')
+      throw new NoProviderMatchError(
+        'No provider match was found; edit the app metadata or retry with a different name',
+      )
     }
     const metadata = metadataSchema.parse(results[0])
     const { launchbox, libretro } = metadata
     const gameName = launchbox?.name || libretro?.name
     if (!gameName) {
-      throw new NoProviderMatchError('No provider match was found; edit the app metadata or retry with a different name')
+      throw new NoProviderMatchError(
+        'No provider match was found; edit the app metadata or retry with a different name',
+      )
     }
     const artwork = await resolveArtwork({ ...rom, gameName, mountedSource: source }, metadata, options)
     const date = launchbox?.releaseDate ? DateTime.fromISO(launchbox.releaseDate) : undefined
@@ -255,7 +297,10 @@ export async function enrichMountedRom(
           artworkError: artwork.artworkError,
           identification: {
             ...identification,
-            confidence: !match && identification.md5 && libretro?.md5?.toLowerCase() === identification.md5 ? 'content' : 'filename',
+            confidence:
+              !match && identification.md5 && libretro?.md5?.toLowerCase() === identification.md5
+                ? 'content'
+                : 'filename',
           },
           metadata: match ? 'manual' : 'ready',
           metadataAttemptedAt: Date.now(),
@@ -303,7 +348,12 @@ export async function retryMountedArtwork(library: Library, rom: MountedRom) {
     .update(romTable)
     .set({
       gameBoxartFileIds: artwork.gameBoxartFileIds,
-      mountedSource: { ...source, artwork: artwork.artwork, artworkAttemptedAt: artwork.artworkAttemptedAt, artworkError: artwork.artworkError },
+      mountedSource: {
+        ...source,
+        artwork: artwork.artwork,
+        artworkAttemptedAt: artwork.artworkAttemptedAt,
+        artworkError: artwork.artworkError,
+      },
     })
     .where(and(eq(romTable.id, rom.id), eq(romTable.status, statusEnum.normal), eq(romTable.mountedSource, source)))
     .returning()
@@ -336,7 +386,7 @@ export async function enrichMountedRoms(library: Library, retryErrors = true, op
     .limit(50)
   for (const rom of pending) {
     try {
-      await enrichMountedRom(library, rom, undefined, options)
+      await enrichMountedRom(library, rom, options)
     } catch {
       // Each failed attempt is persisted without discarding earlier metadata or cached digests.
     }

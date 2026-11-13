@@ -185,8 +185,8 @@ export const favoriteTable = sqliteTable(
 )
 
 export const mountedLibrarySettingsTable = sqliteTable('mounted_library_settings', {
-  id: integer().primaryKey().notNull(),
   automaticMetadata: integer({ mode: 'boolean' }).notNull(),
+  id: integer().primaryKey().notNull(),
   scanIntervalSeconds: integer().notNull(),
   updatedAt: integer({ mode: 'timestamp_ms' })
     .notNull()
