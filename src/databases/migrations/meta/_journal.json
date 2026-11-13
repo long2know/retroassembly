@@ -64,6 +64,13 @@
       "when": 1794456655030,
       "tag": "0008_mounted_library",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794530143000,
+      "tag": "0009_mounted_library_settings",
+      "breakpoints": true
     }
   ]
 }

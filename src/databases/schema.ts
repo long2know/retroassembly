@@ -183,3 +183,12 @@ export const favoriteTable = sqliteTable(
     index('idx_favorites_user_rom_status').on(table.userId, table.romId, table.status),
   ],
 )
+
+export const mountedLibrarySettingsTable = sqliteTable('mounted_library_settings', {
+  id: integer().primaryKey().notNull(),
+  automaticMetadata: integer({ mode: 'boolean' }).notNull(),
+  scanIntervalSeconds: integer().notNull(),
+  updatedAt: integer({ mode: 'timestamp_ms' })
+    .notNull()
+    .$onUpdateFn(() => new Date()),
+})
