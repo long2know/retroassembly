@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
+import path from 'node:path'
 import { expect, test } from '@playwright/test'
+import type { MountedLibraryStatus, MountedSource } from '../../src/constants/mounted-library.ts'
 
 interface Rom {
   fileId: string
@@ -9,6 +11,7 @@ interface Rom {
   gameBoxartFileIds: null | string
   gameName: null | string
   id: string
+  mountedSource: MountedSource
   platform: string
   userId: null | string
 }
@@ -50,7 +53,7 @@ function inspectAppFile(container: string, fileId: string) {
   )
 }
 
-test('mounted sources remain immutable through browser play, state saving, rescans and two restarts', async ({
+test('mounted sources remain immutable through content matching, settings, browser play and two restarts', async ({
   page,
 }) => {
   const container = process.env.RETROASSEMBLY_MOUNTED_TEST_CONTAINER
@@ -58,6 +61,50 @@ test('mounted sources remain immutable through browser play, state saving, resca
   if (!container?.startsWith('retro-web-5c9839ba-app-')) {
     throw new Error('Refusing to restart an unrecognized acceptance container')
   }
+  const provider = process.env.RETROASSEMBLY_MOUNTED_TEST_PROVIDER
+  if (!provider?.startsWith('retro-web-5c9839ba-provider-')) {
+    throw new Error('Refusing to inspect an unrecognized acceptance provider')
+  }
+  let preferenceWrites = 0
+  page.on('request', function recordPreferenceWrite(request) {
+    if (new URL(request.url()).pathname === '/api/v1/preference' && request.method() === 'POST') {
+      preferenceWrites += 1
+    }
+  })
+
+  function providerMatches() {
+    const logs = execFileSync('docker', ['logs', provider], { encoding: 'utf8' }).trim()
+    const records: { matched: boolean; method: string }[] = logs
+      ? logs.split('\n').map(function parseRecord(line) {
+          return JSON.parse(line)
+        })
+      : []
+    return records.filter(function matched(record) {
+      return record.method === 'POST' && record.matched
+    }).length
+  }
+
+  async function mountedStatus() {
+    const response = await page.request.get('/api/v1/mounted-library')
+    expect(response.status(), await response.text()).toBe(200)
+    const status: MountedLibraryStatus = await response.json()
+    return status
+  }
+
+  async function metadataIdle() {
+    await expect
+      .poll(async function metadataFinished() {
+        return (await mountedStatus()).metadata.running
+      }, { timeout: 60_000 })
+      .toBe(false)
+  }
+
+  async function openSettings() {
+    await page.getByRole('button', { exact: true, name: 'Menu' }).click()
+    await page.getByRole('menuitem', { exact: true, name: 'Settings' }).click()
+    return page.getByRole('dialog', { exact: true, name: 'Settings' })
+  }
+
   const coreRequests: { status: number; url: string }[] = []
   const sourceRequests: { status: number; url: string }[] = []
   page.on('response', function recordCore(response) {
@@ -103,11 +150,11 @@ test('mounted sources remain immutable through browser play, state saving, resca
       },
       { timeout: 30_000 },
     )
-    .toBe(1)
+    .toBe(2)
   const firstScan = await page.request.post('/api/v1/mounted-library')
   expect(firstScan.status()).toBe(200)
   const firstStatus = await page.request.get('/api/v1/mounted-library')
-  expect(await firstStatus.json()).toMatchObject({ indexed: 1 })
+  expect(await firstStatus.json()).toMatchObject({ indexed: 2 })
 
   async function findRom() {
     const response = await page.request.get('/api/v1/roms/search?query=Immutable%20Pulse')
@@ -134,6 +181,38 @@ test('mounted sources remain immutable through browser play, state saving, resca
     const response = await page.request.get(url)
     expect(response.status(), await response.text()).toBe(200)
     expect(hash(await response.body())).toBe(process.env.RETROASSEMBLY_MOUNTED_TEST_ROM_SHA256)
+  }
+
+  async function findArchive() {
+    const response = await page.request.get('/api/v1/roms/search?query=GoodTools%20Alias')
+    expect(response.status(), await response.text()).toBe(200)
+    const result: { roms: Rom[] } = await response.json()
+    const games = result.roms.filter(function archive(candidate) {
+      return candidate.fileName === 'Homebrew/GoodTools Alias (U) [!].zip'
+    })
+    expect(games).toHaveLength(1)
+    return games[0]
+  }
+
+  await expect
+    .poll(async function archiveEnrichment() {
+      return (await findArchive()).gameName
+    }, { timeout: 60_000 })
+    .toBe('Archive Pulse — content metadata')
+  await metadataIdle()
+  const archive = await findArchive()
+  expect(archive.mountedSource.identification).toMatchObject({
+    confidence: 'content',
+    md5: process.env.RETROASSEMBLY_MOUNTED_TEST_ZIP_CONTENT_MD5,
+    mode: 'zip-entry',
+    payloadName: 'Inner Payload.nes',
+  })
+  expect(typeof archive.mountedSource.identification?.hashedAt).toBe('number')
+  expect((await findRom()).mountedSource.identification).toMatchObject({ confidence: 'content', mode: 'file' })
+  for (const url of [`/api/v1/files/${encodeURIComponent(archive.fileId)}`, `/api/v1/roms/${archive.id}/content`]) {
+    const response = await page.request.get(url)
+    expect(response.status(), await response.text()).toBe(200)
+    expect(hash(await response.body())).toBe(process.env.RETROASSEMBLY_MOUNTED_TEST_ZIP_SHA256)
   }
 
   const preferenceResponse = await page.request.get('/api/v1/preference')
@@ -232,6 +311,131 @@ test('mounted sources remain immutable through browser play, state saving, resca
   await page.getByText(/^save & exit$/iu).click()
   await expect(canvas).not.toBeAttached()
 
+  const rawIdentification = (await findRom()).mountedSource.identification
+  const archiveIdentification = (await findArchive()).mountedSource.identification
+  const beforeNavigation = await mountedStatus()
+  const beforeNavigationMatches = providerMatches()
+  const disableNes = await page.request.post('/api/v1/preference', { data: { ui: { platforms: ['snes'] } } })
+  expect(disableNes.status(), await disableNes.text()).toBe(200)
+  await page.goto('/library/roms')
+  const settings = await openSettings()
+  await settings.getByRole('tab', { exact: true, name: 'Library' }).click()
+  const beforeSettingsWrites = preferenceWrites
+  await expect(settings.getByTestId('platform-count-nes')).toHaveText('2')
+  await expect(settings.getByRole('checkbox', { exact: true, name: 'NES' })).not.toBeChecked()
+  const hideEmpty = settings.getByRole('checkbox', { exact: true, name: 'Hide empty platforms' })
+  await hideEmpty.check()
+  await expect(settings.getByTestId('platform-option-snes')).not.toBeVisible()
+  await expect(settings.getByTestId('platform-option-nes')).toBeVisible()
+  await hideEmpty.uncheck()
+  await expect(settings.getByTestId('platform-option-snes')).toBeVisible()
+  const unchangedPreferences = await page.request.get('/api/v1/preference')
+  expect(await unchangedPreferences.json()).toMatchObject({ ui: { platforms: ['snes'] } })
+  expect(preferenceWrites).toBe(beforeSettingsWrites)
+  const enableResponse = page.waitForResponse(function enabled(response) {
+    return new URL(response.url()).pathname === '/api/v1/preference' && response.request().method() === 'POST'
+  })
+  await settings.getByRole('button', { exact: true, name: 'Enable platforms with ROMs' }).click()
+  expect((await enableResponse).status()).toBe(200)
+  await expect(settings.getByRole('checkbox', { exact: true, name: 'NES' })).toBeChecked()
+  const enabledPreferences = await page.request.get('/api/v1/preference')
+  expect(await enabledPreferences.json()).toMatchObject({ ui: { platforms: ['nes'] } })
+  const counts = await mountedStatus()
+  expect(counts.platforms.find(function nes(platform) { return platform.platform === 'nes' })).toEqual({
+    indexed: 2, platform: 'nes', unsupported: 0,
+  })
+  await settings.getByRole('tab', { exact: true, name: 'ROM / Metadata' }).click()
+  await expect(settings.getByTestId('mounted-library-status')).toBeVisible()
+  const scanInterval = settings.getByRole('spinbutton', { exact: true, name: 'Scan interval (seconds)' })
+  for (const seconds of ['3600', '0']) {
+    await scanInterval.fill(seconds)
+    const intervalResponse = page.waitForResponse(function intervalSaved(response) {
+      return new URL(response.url()).pathname === '/api/v1/mounted-library' && response.request().method() === 'PATCH'
+    })
+    await settings.getByRole('button', { exact: true, name: 'Save scan interval' }).click()
+    expect((await intervalResponse).status()).toBe(200)
+    expect((await mountedStatus()).settings.scanIntervalSeconds).toBe(Number(seconds))
+  }
+  const automatic = settings.getByRole('switch', { exact: true, name: 'Automatic metadata and cover downloads' })
+  await expect(automatic).toBeChecked()
+  const automaticResponse = page.waitForResponse(function automaticSaved(response) {
+    return new URL(response.url()).pathname === '/api/v1/mounted-library' && response.request().method() === 'PATCH'
+  })
+  await automatic.uncheck()
+  expect((await automaticResponse).status()).toBe(200)
+  await expect(automatic).not.toBeChecked()
+  expect(await mountedStatus()).toMatchObject({
+    automaticMetadataEnabled: false,
+    networkAllowed: true,
+    settings: { automaticMetadata: false, scanIntervalSeconds: 0 },
+  })
+  const reportDirectory = path.dirname(process.env.RETROASSEMBLY_MOUNTED_TEST_REPORT || 'node_modules/.cache/ci/built-image.json')
+  await fs.mkdir(reportDirectory, { recursive: true })
+  await page.screenshot({ path: path.join(reportDirectory, 'mounted-metadata-settings.png') })
+  const automaticCoverRequests: string[] = []
+  const cachedPage = await page.context().newPage()
+  await cachedPage.route(/https:\/\/(?:thumbnails\.libretro\.com\/|cdn\.jsdelivr\.net\/gh\/libretro-thumbnails\/)/u, async function blockRemoteCover(route) {
+    automaticCoverRequests.push(route.request().url())
+    await route.abort()
+  })
+  await cachedPage.goto('/library/roms')
+  await cachedPage.getByText('Archive Pulse — content metadata', { exact: true }).first().click()
+  await cachedPage.goto('/library/roms')
+  const cachedCover = cachedPage.locator(`img[src="/api/v1/files/${encodeURIComponent(coverFileId)}"]`).first()
+  await expect(cachedCover).toBeVisible()
+  await expect.poll(async function renderedCachedCover() {
+    return await cachedCover.evaluate(function loaded(image) {
+      return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0
+    })
+  }).toBe(true)
+  await cachedPage.close()
+  expect(automaticCoverRequests).toEqual([])
+  expect(providerMatches()).toBe(beforeNavigationMatches)
+  const afterNavigation = await mountedStatus()
+  expect(afterNavigation.lastScanStartedAt).toBe(beforeNavigation.lastScanStartedAt)
+  expect(afterNavigation.lastScanFinishedAt).toBe(beforeNavigation.lastScanFinishedAt)
+  expect((await findRom()).mountedSource.identification).toEqual(rawIdentification)
+  expect((await findArchive()).mountedSource.identification).toEqual(archiveIdentification)
+
+  const refreshResponse = page.waitForResponse(function refreshed(response) {
+    return new URL(response.url()).pathname === '/api/v1/mounted-library/metadata' && response.request().method() === 'POST'
+  })
+  await settings.getByRole('button', { exact: true, name: 'Refresh metadata' }).click()
+  expect((await refreshResponse).status()).toBe(200)
+  await metadataIdle()
+  expect(providerMatches()).toBeGreaterThan(beforeNavigationMatches)
+  expect((await mountedStatus()).metadata.operation).toBe('metadata')
+  expect((await findArchive()).mountedSource.identification).toEqual(archiveIdentification)
+  const retryResponse = page.waitForResponse(function retried(response) {
+    return new URL(response.url()).pathname === '/api/v1/mounted-library/artwork' && response.request().method() === 'POST'
+  })
+  await settings.getByRole('button', { exact: true, name: 'Retry missing covers' }).click()
+  expect((await retryResponse).status()).toBe(200)
+  await metadataIdle()
+  expect((await mountedStatus()).metadata.operation).toBe('artwork')
+  const beforeExplicitScanMatches = providerMatches()
+  const scanResponse = page.waitForResponse(function scanned(response) {
+    return new URL(response.url()).pathname === '/api/v1/mounted-library' && response.request().method() === 'POST'
+  })
+  await settings.getByRole('button', { exact: true, name: 'Scan ROM folders' }).click()
+  expect((await scanResponse).status()).toBe(200)
+  await expect.poll(async function scanFinished() { return (await mountedStatus()).running }).toBe(false)
+  await metadataIdle()
+  expect(providerMatches()).toBe(beforeExplicitScanMatches)
+  expect((await mountedStatus()).indexed).toBe(2)
+  expect((await findRom()).mountedSource.identification).toEqual(rawIdentification)
+  expect((await findArchive()).mountedSource.identification).toEqual(archiveIdentification)
+  expect(await findRom()).toMatchObject({
+    gameBoxartFileIds: coverFileId,
+    gameName: override,
+    id: rom.id,
+    mountedSource: { metadata: 'manual' },
+  })
+  await settings.getByTitle('Close', { exact: true }).click()
+  await page.goto('/library/roms')
+  await page.getByText(override, { exact: true }).first().click()
+  const beforeRestartMatches = providerMatches()
+
   for (let restart = 0; restart < 2; restart += 1) {
     execFileSync('docker', ['restart', container], { encoding: 'utf8' })
     await expect
@@ -249,7 +453,15 @@ test('mounted sources remain immutable through browser play, state saving, resca
       .toBe(200)
     const rescan = await page.request.post('/api/v1/mounted-library')
     expect(rescan.status()).toBe(200)
+    expect(await mountedStatus()).toMatchObject({
+      automaticMetadataEnabled: false,
+      settings: { automaticMetadata: false, scanIntervalSeconds: 0 },
+    })
+    expect((await findArchive()).id).toBe(archive.id)
+    expect((await findArchive()).mountedSource.identification).toEqual(archiveIdentification)
+    expect(providerMatches()).toBe(beforeRestartMatches)
     const persistedRom = await findRom()
+    expect(persistedRom.mountedSource.identification).toEqual(rawIdentification)
     expect(persistedRom.id).toBe(rom.id)
     expect(persistedRom.gameName).toBe(override)
     expect(persistedRom.gameBoxartFileIds).toBe(coverFileId)
@@ -265,6 +477,11 @@ test('mounted sources remain immutable through browser play, state saving, resca
     expect(hash(await persistedState.body())).toBe(hash(stateBytes))
   }
   await page.reload()
+  const restartedSettings = await openSettings()
+  await restartedSettings.getByRole('tab', { exact: true, name: 'ROM / Metadata' }).click()
+  await expect(restartedSettings.getByRole('switch', { exact: true, name: 'Automatic metadata and cover downloads' })).not.toBeChecked()
+  await expect(restartedSettings.getByRole('spinbutton', { exact: true, name: 'Scan interval (seconds)' })).toHaveValue('0')
+  await restartedSettings.getByTitle('Close', { exact: true }).click()
   await page.getByText(/^continue$/iu).click()
   await expect(canvas).toBeVisible({ timeout: 90_000 })
   await expect(canvas).toHaveCSS('opacity', '1', { timeout: 90_000 })
@@ -287,6 +504,8 @@ test('mounted sources remain immutable through browser play, state saving, resca
   await fs.writeFile(
     process.env.RETROASSEMBLY_MOUNTED_TEST_BROWSER_REPORT || '',
     JSON.stringify({
+      automaticCoverRequests,
+      automaticMetadata: (await mountedStatus()).settings.automaticMetadata,
       biosPlatforms,
       canvasFrames: [firstFrame, changedFrame],
       coreRequests,
@@ -296,6 +515,9 @@ test('mounted sources remain immutable through browser play, state saving, resca
       resumedCanvasFrames: [resumedFrame, resumedChangedFrame],
       romId: rom.id,
       sourceRequests,
+      platformCounts: counts.platforms,
+      providerMatches: providerMatches(),
+      zip: { identification: archiveIdentification, romId: archive.id },
       state: { fileId: state.fileId, sha256: hash(stateBytes) },
       wasmInstances: await page.evaluate(() => Number(Reflect.get(globalThis, 'mountedLibraryWasmInstances'))),
     }),

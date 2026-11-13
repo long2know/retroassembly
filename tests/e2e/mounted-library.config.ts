@@ -6,7 +6,7 @@ export default defineConfig({
   retries: 0,
   testDir: '.',
   testMatch: 'mounted-library.spec.ts',
-  timeout: 180_000,
+  timeout: 240_000,
   use: {
     baseURL: process.env.RETROASSEMBLY_MOUNTED_TEST_URL,
     channel: process.env.RETROASSEMBLY_MOUNTED_TEST_BROWSER || 'chrome',
