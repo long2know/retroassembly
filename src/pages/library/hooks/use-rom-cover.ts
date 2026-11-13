@@ -20,7 +20,10 @@ export function useRomCover(rom: Rom) {
   const remoteCoversEnabled = !rom.mountedSource || automaticMetadataEnabled
   const remoteCoversEnabledRef = useRef(remoteCoversEnabled)
   const cachedRomCovers = rom.gameBoxartFileIds
-    ? rom.gameBoxartFileIds.split(',').filter(Boolean).map((fileId) => getFileUrl(fileId))
+    ? rom.gameBoxartFileIds
+        .split(',')
+        .filter(Boolean)
+        .map((fileId) => getFileUrl(fileId))
     : []
 
   useEffect(() => {

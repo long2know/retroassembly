@@ -59,7 +59,9 @@ export function PlatformSettings() {
             <p className='text-sm opacity-70'>{t('mountedLibrary.detectedDescription')}</p>
             <div className='flex flex-wrap items-center justify-between gap-3'>
               <Button
-                disabled={!data || Boolean(error) || isLoading || isUpdating || data.running || detectedPlatforms.length === 0}
+                disabled={
+                  !data || Boolean(error) || isLoading || isUpdating || data.running || detectedPlatforms.length === 0
+                }
                 loading={isUpdating}
                 onClick={handleEnableDetected}
                 type='button'
@@ -73,18 +75,18 @@ export function PlatformSettings() {
                 {t('mountedLibrary.hideEmpty')}
               </label>
             </div>
-            {!data && !error ? <p role='status'>{t('mountedLibrary.loading')}</p> : null}
+            {!data && !error ? <output>{t('mountedLibrary.loading')}</output> : null}
             {error || requestFailed ? (
               <Callout.Root color='red' role='alert'>
-                <Callout.Text>
-                  {t(error ? 'mountedLibrary.loadFailed' : 'mountedLibrary.requestFailed')}
-                </Callout.Text>
+                <Callout.Text>{t(error ? 'mountedLibrary.loadFailed' : 'mountedLibrary.requestFailed')}</Callout.Text>
                 <Button loading={isValidating} onClick={handleReloadStatus} size='1' type='button' variant='soft'>
                   {t('common.retry')}
                 </Button>
               </Callout.Root>
             ) : null}
-            {data && detectedPlatforms.length === 0 ? <p className='text-sm'>{t('mountedLibrary.noDetected')}</p> : null}
+            {data && detectedPlatforms.length === 0 ? (
+              <p className='text-sm'>{t('mountedLibrary.noDetected')}</p>
+            ) : null}
           </div>
         ) : null}
 

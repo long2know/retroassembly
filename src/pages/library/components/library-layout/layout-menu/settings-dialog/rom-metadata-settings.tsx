@@ -9,7 +9,7 @@ import { useMountedLibrary } from '#@/pages/library/hooks/use-mounted-library.ts
 import { SettingsTitle } from './settings-title.tsx'
 
 type MountedAction = 'scan' | 'metadata' | 'artwork'
-type MountedSettingsUpdate = InferRequestType<typeof client['mounted-library']['$patch']>['json']
+type MountedSettingsUpdate = InferRequestType<(typeof client)['mounted-library']['$patch']>['json']
 
 export function RomMetadataSettings() {
   const { t, i18n } = useTranslation()
@@ -23,9 +23,9 @@ export function RomMetadataSettings() {
 
   const { isMutating: isUpdating, trigger: updateSettings } = useSWRMutation(
     { endpoint: 'mounted-library', method: 'patch' },
-    async (_key, { arg }: { arg: MountedSettingsUpdate }) => {
-      return await parseResponse(client['mounted-library'].$patch({ json: arg }))
-    },
+    async (_key, { arg }: { arg: MountedSettingsUpdate }) => 
+      await parseResponse(client['mounted-library'].$patch({ json: arg }))
+    ,
   )
 
   const { isMutating, trigger: triggerAction } = useSWRMutation(
@@ -44,7 +44,7 @@ export function RomMetadataSettings() {
   useEffect(() => {
     if (previousCompletion.current !== completion) {
       previousCompletion.current = completion
-      void revalidate()
+      revalidate()
     }
   }, [completion, revalidate])
 
@@ -121,7 +121,11 @@ export function RomMetadataSettings() {
   if (!data) {
     return (
       <Card>
-        <p role={error ? 'alert' : 'status'}>{t(error ? 'mountedLibrary.loadFailed' : 'mountedLibrary.loading')}</p>
+        {error ? (
+          <p role='alert'>{t('mountedLibrary.loadFailed')}</p>
+        ) : (
+          <output>{t('mountedLibrary.loading')}</output>
+        )}
         {error ? (
           <Button className='mt-3' loading={isValidating} onClick={handleReloadStatus} type='button' variant='soft'>
             {t('common.retry')}
@@ -146,7 +150,7 @@ export function RomMetadataSettings() {
           </Button>
         </Callout.Root>
       ) : null}
-      {settingsSaved ? <p className='text-sm' role='status'>{t('mountedLibrary.settingsSaved')}</p> : null}
+      {settingsSaved ? <output className='text-sm'>{t('mountedLibrary.settingsSaved')}</output> : null}
 
       <section>
         <SettingsTitle>
@@ -161,29 +165,50 @@ export function RomMetadataSettings() {
               <span>{t('mountedLibrary.unsupportedCount', { count: data.unsupported })}</span>
             </div>
             <p className='text-xs opacity-70'>
-              {t('mountedLibrary.lastScan')}: <time dateTime={data.lastSuccessfulScanAt}>{formatTime(data.lastSuccessfulScanAt)}</time>
+              {t('mountedLibrary.lastScan')}:{' '}
+              <time dateTime={data.lastSuccessfulScanAt}>{formatTime(data.lastSuccessfulScanAt)}</time>
             </p>
             <p className='text-sm opacity-70'>{t('mountedLibrary.scanDescription')}</p>
-            {scanning ? <p role='status'>{t('mountedLibrary.scanning')}</p> : null}
-            {data.error ? <p className='text-sm text-(--red-11)' role='alert'>{data.error}</p> : null}
+            {scanning ? <output>{t('mountedLibrary.scanning')}</output> : null}
+            {data.error ? (
+              <p className='text-sm text-(--red-11)' role='alert'>
+                {data.error}
+              </p>
+            ) : null}
             {data.warnings.length > 0 ? (
               <details className='text-sm'>
-                <summary className='cursor-pointer'>{t('mountedLibrary.warnings', { count: data.warnings.length })}</summary>
+                <summary className='cursor-pointer'>
+                  {t('mountedLibrary.warnings', { count: data.warnings.length })}
+                </summary>
                 <ul className='mt-2 list-disc space-y-1 pl-5'>
-                  {data.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
+                  {data.warnings.map((warning, index) => (
+                    <li key={index}>{warning}</li>
+                  ))}
                 </ul>
               </details>
             ) : null}
             <div>
-              <Button disabled={busy} loading={isMutating && activeAction === 'scan'} onClick={handleScan} type='button' variant='soft'>
+              <Button
+                disabled={busy}
+                loading={isMutating && activeAction === 'scan'}
+                onClick={handleScan}
+                type='button'
+                variant='soft'
+              >
                 <span aria-hidden className='icon-[mdi--folder-search]' />
                 {t('mountedLibrary.scan')}
               </Button>
             </div>
           </div>
 
-          <form className='mt-5 flex flex-col gap-2 border-t border-(--gray-5) pt-4' key={data.settings.scanIntervalSeconds} onSubmit={handleIntervalSubmit}>
-            <label className='text-sm font-medium' htmlFor='mounted-library-scan-interval'>{t('mountedLibrary.scanInterval')}</label>
+          <form
+            className='mt-5 flex flex-col gap-2 border-t border-(--gray-5) pt-4'
+            key={data.settings.scanIntervalSeconds}
+            onSubmit={handleIntervalSubmit}
+          >
+            <label className='text-sm font-medium' htmlFor='mounted-library-scan-interval'>
+              {t('mountedLibrary.scanInterval')}
+            </label>
             <div className='flex flex-wrap items-center gap-3'>
               <TextField.Root
                 aria-describedby='mounted-library-interval-description'
@@ -199,11 +224,18 @@ export function RomMetadataSettings() {
                 step={1}
                 type='number'
               />
-              <Button disabled={isLoading || Boolean(error) || isUpdating || isMutating || data.running} loading={isUpdating} type='submit' variant='soft'>
+              <Button
+                disabled={isLoading || Boolean(error) || isUpdating || isMutating || data.running}
+                loading={isUpdating}
+                type='submit'
+                variant='soft'
+              >
                 {t('mountedLibrary.saveInterval')}
               </Button>
             </div>
-            <p className='text-xs opacity-70' id='mounted-library-interval-description'>{t('mountedLibrary.intervalDescription')}</p>
+            <p className='text-xs opacity-70' id='mounted-library-interval-description'>
+              {t('mountedLibrary.intervalDescription')}
+            </p>
           </form>
         </Card>
       </section>
@@ -226,26 +258,58 @@ export function RomMetadataSettings() {
                   onCheckedChange={handleAutomaticMetadata}
                 />
               </label>
-              <p className='mt-2 text-xs opacity-70' id='mounted-library-automatic-description'>{t('mountedLibrary.automaticDescription')}</p>
-            </div>
-            {!data.networkAllowed ? (
-              <Callout.Root color='amber'><Callout.Text>{t('mountedLibrary.networkDisabled')}</Callout.Text></Callout.Root>
-            ) : null}
-            <p className='text-sm opacity-70'>{t('mountedLibrary.metadataDescription')}</p>
-            <div aria-busy={refreshing} aria-live='polite' className='text-sm' data-testid='mounted-library-metadata-status'>
-              {refreshing ? <p>{t('mountedLibrary.refreshing')}</p> : null}
-              <p>{t('mountedLibrary.metadataProgress', { processed: data.metadata.processed, total: data.metadata.total, errors: data.metadata.errors })}</p>
-              <p className='mt-1 text-xs opacity-70'>
-                {t('mountedLibrary.lastMetadata')}: <time dateTime={data.metadata.lastFinishedAt}>{formatTime(data.metadata.lastFinishedAt)}</time>
+              <p className='mt-2 text-xs opacity-70' id='mounted-library-automatic-description'>
+                {t('mountedLibrary.automaticDescription')}
               </p>
-              {data.metadata.error ? <p className='mt-2 text-(--red-11)' role='alert'>{data.metadata.error}</p> : null}
+            </div>
+            {data.networkAllowed ? null : (
+              <Callout.Root color='amber'>
+                <Callout.Text>{t('mountedLibrary.networkDisabled')}</Callout.Text>
+              </Callout.Root>
+            )}
+            <p className='text-sm opacity-70'>{t('mountedLibrary.metadataDescription')}</p>
+            <div
+              aria-busy={refreshing}
+              aria-live='polite'
+              className='text-sm'
+              data-testid='mounted-library-metadata-status'
+            >
+              {refreshing ? <p>{t('mountedLibrary.refreshing')}</p> : null}
+              <p>
+                {t('mountedLibrary.metadataProgress', {
+                  errors: data.metadata.errors,
+                  processed: data.metadata.processed,
+                  total: data.metadata.total,
+                })}
+              </p>
+              <p className='mt-1 text-xs opacity-70'>
+                {t('mountedLibrary.lastMetadata')}:{' '}
+                <time dateTime={data.metadata.lastFinishedAt}>{formatTime(data.metadata.lastFinishedAt)}</time>
+              </p>
+              {data.metadata.error ? (
+                <p className='mt-2 text-(--red-11)' role='alert'>
+                  {data.metadata.error}
+                </p>
+              ) : null}
             </div>
             <div className='flex flex-wrap gap-3'>
-              <Button disabled={busy || !data.networkAllowed || data.indexed === 0} loading={isMutating && activeAction === 'metadata'} onClick={handleMetadata} type='button' variant='soft'>
+              <Button
+                disabled={busy || !data.networkAllowed || data.indexed === 0}
+                loading={isMutating && activeAction === 'metadata'}
+                onClick={handleMetadata}
+                type='button'
+                variant='soft'
+              >
                 <span aria-hidden className='icon-[mdi--database-refresh]' />
                 {t('mountedLibrary.refreshMetadata')}
               </Button>
-              <Button disabled={busy || !data.networkAllowed || data.indexed === 0} loading={isMutating && activeAction === 'artwork'} onClick={handleArtwork} type='button' variant='soft'>
+              <Button
+                disabled={busy || !data.networkAllowed || data.indexed === 0}
+                loading={isMutating && activeAction === 'artwork'}
+                onClick={handleArtwork}
+                type='button'
+                variant='soft'
+              >
                 <span aria-hidden className='icon-[mdi--image-refresh]' />
                 {t('mountedLibrary.retryArtwork')}
               </Button>

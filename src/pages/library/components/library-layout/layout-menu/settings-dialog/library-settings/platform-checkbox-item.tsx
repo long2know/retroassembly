@@ -11,7 +11,12 @@ interface PlatformCheckboxItemProps {
   unsupported?: number
 }
 
-export function PlatformCheckboxItem({ disabled, indexed, platform, unsupported }: Readonly<PlatformCheckboxItemProps>) {
+export function PlatformCheckboxItem({
+  disabled,
+  indexed,
+  platform,
+  unsupported,
+}: Readonly<PlatformCheckboxItemProps>) {
   const { t } = useTranslation()
   const { isLoading, preference, update } = usePreference()
 

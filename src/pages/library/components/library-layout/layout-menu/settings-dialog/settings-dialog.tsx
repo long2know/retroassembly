@@ -25,7 +25,8 @@ export function SettingsDialog({ onOpenChange, ...props }: Readonly<Dialog.RootP
   const availableTabs = settingsTabs.filter(
     (tab) => tab.name !== 'romMetadata' || env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY === 'true',
   )
-  const { content: TabContent, name: activeTabName } = availableTabs.find((tab) => tab.name === tabName) || availableTabs[0]
+  const { content: TabContent, name: activeTabName } =
+    availableTabs.find((tab) => tab.name === tabName) || availableTabs[0]
 
   function handleOpenChange(open: boolean) {
     onOpenChange?.(open)
