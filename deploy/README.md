@@ -39,22 +39,22 @@ These are all variables exposed by the sample Compose. Override them with export
 variables before `docker compose` runs. `--env-file /dev/null` avoids accidentally loading
 a live `.env`; credentials and personal configuration must never be committed.
 
-| Variable                                             | Default                                    |
-| ---------------------------------------------------- | ------------------------------------------ |
-| `DOCKER_DATA`                                        | Required; your application-data parent     |
-| `RETROASSEMBLY_IMAGE`                                | `ghcr.io/long2know/retroassembly:latest`   |
-| `PUID`, `PGID`                                       | `1000`, `1000`                             |
-| `RETROASSEMBLY_HTTP_PORT`                            | `8910`                                     |
-| `RETROASSEMBLY_ROM_SOURCE`                           | `/mnt/emu/Emulation/roms`                  |
-| `RETROASSEMBLY_BIOS_SOURCE`                          | `/mnt/emu/Emulation/bios`                  |
-| `RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY`   | `true`                                     |
-| `RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY`         | `true`                                     |
-| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_DIRECTORY`        | `/app/roms`                                |
-| `RETROASSEMBLY_RUN_TIME_SHARED_BIOS_DIRECTORY`       | `/app/bios`                                |
+| Variable                                             | Default                                               |
+| ---------------------------------------------------- | ----------------------------------------------------- |
+| `DOCKER_DATA`                                        | Required; your application-data parent                |
+| `RETROASSEMBLY_IMAGE`                                | `ghcr.io/long2know/retroassembly:latest`              |
+| `PUID`, `PGID`                                       | `1000`, `1000`                                        |
+| `RETROASSEMBLY_HTTP_PORT`                            | `8910`                                                |
+| `RETROASSEMBLY_ROM_SOURCE`                           | `/mnt/emu/Emulation/roms`                             |
+| `RETROASSEMBLY_BIOS_SOURCE`                          | `/mnt/emu/Emulation/bios`                             |
+| `RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY`   | `true`                                                |
+| `RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY`         | `true`                                                |
+| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_DIRECTORY`        | `/app/roms`                                           |
+| `RETROASSEMBLY_RUN_TIME_SHARED_BIOS_DIRECTORY`       | `/app/bios`                                           |
 | `RETROASSEMBLY_RUN_TIME_SHARED_ROM_SCAN_INTERVAL`    | Initial default: `300` seconds; `0` means manual-only |
-| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED` | `true`; `false` is a hard provider-network disable |
-| `RETROASSEMBLY_RUN_TIME_DATA_DIRECTORY`              | `/app/data`                                |
-| `RETROASSEMBLY_RUN_TIME_STORAGE_DIRECTORY`           | `/app/data/storage`                        |
+| `RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED` | `true`; `false` is a hard provider-network disable    |
+| `RETROASSEMBLY_RUN_TIME_DATA_DIRECTORY`              | `/app/data`                                           |
+| `RETROASSEMBLY_RUN_TIME_STORAGE_DIRECTORY`           | `/app/data/storage`                                   |
 
 Keep the internal directory overrides aligned with their mounts. Writable data/storage
 must not overlap the immutable source directories; invalid configurations fail closed.

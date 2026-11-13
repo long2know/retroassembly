@@ -72,8 +72,8 @@ test('mounted sources remain immutable through content matching, settings, brows
     }
   })
 
-  function providerMatches() {
-    const logs = execFileSync('docker', ['logs', provider], { encoding: 'utf8' }).trim()
+  function providerMatches(providerContainer: string) {
+    const logs = execFileSync('docker', ['logs', providerContainer], { encoding: 'utf8' }).trim()
     const records: { matched: boolean; method: string }[] = logs
       ? logs.split('\n').map(function parseRecord(line) {
           return JSON.parse(line)
@@ -93,9 +93,13 @@ test('mounted sources remain immutable through content matching, settings, brows
 
   async function metadataIdle() {
     await expect
-      .poll(async function metadataFinished() {
-        return (await mountedStatus()).metadata.running
-      }, { timeout: 60_000 })
+      .poll(
+        async function metadataFinished() {
+          const status = await mountedStatus()
+          return status.metadata.running
+        },
+        { timeout: 60_000 },
+      )
       .toBe(false)
   }
 
@@ -194,10 +198,20 @@ test('mounted sources remain immutable through content matching, settings, brows
     return games[0]
   }
 
+  async function identificationCache() {
+    const rawRom = await findRom()
+    const zipRom = await findArchive()
+    return { raw: rawRom.mountedSource.identification, zip: zipRom.mountedSource.identification }
+  }
+
   await expect
-    .poll(async function archiveEnrichment() {
-      return (await findArchive()).gameName
-    }, { timeout: 60_000 })
+    .poll(
+      async function archiveEnrichment() {
+        const foundArchive = await findArchive()
+        return foundArchive.gameName
+      },
+      { timeout: 60_000 },
+    )
     .toBe('Archive Pulse — content metadata')
   await metadataIdle()
   const archive = await findArchive()
@@ -209,7 +223,8 @@ test('mounted sources remain immutable through content matching, settings, brows
     payloadName: 'Inner Payload.nes',
   })
   expect(typeof archive.mountedSource.identification?.hashedAt).toBe('number')
-  expect((await findRom()).mountedSource.identification).toMatchObject({ confidence: 'content', mode: 'file' })
+  const matchedRom = await findRom()
+  expect(matchedRom.mountedSource.identification).toMatchObject({ confidence: 'content', mode: 'file' })
   for (const url of [`/api/v1/files/${encodeURIComponent(archive.fileId)}`, `/api/v1/roms/${archive.id}/content`]) {
     const response = await page.request.get(url)
     expect(response.status(), await response.text()).toBe(200)
@@ -312,10 +327,11 @@ test('mounted sources remain immutable through content matching, settings, brows
   await page.getByText(/^save & exit$/iu).click()
   await expect(canvas).not.toBeAttached()
 
-  const rawIdentification = (await findRom()).mountedSource.identification
-  const archiveIdentification = (await findArchive()).mountedSource.identification
+  const initialIdentification = await identificationCache()
+  const rawIdentification = initialIdentification.raw
+  const archiveIdentification = initialIdentification.zip
   const beforeNavigation = await mountedStatus()
-  const beforeNavigationMatches = providerMatches()
+  const beforeNavigationMatches = providerMatches(provider)
   const disableNes = await page.request.post('/api/v1/preference', { data: { ui: { platforms: ['snes'] } } })
   expect(disableNes.status(), await disableNes.text()).toBe(200)
   await page.goto('/library/roms')
@@ -337,13 +353,20 @@ test('mounted sources remain immutable through content matching, settings, brows
     return new URL(response.url()).pathname === '/api/v1/preference' && response.request().method() === 'POST'
   })
   await settings.getByRole('button', { exact: true, name: 'Enable platforms with ROMs' }).click()
-  expect((await enableResponse).status()).toBe(200)
+  const enabled = await enableResponse
+  expect(enabled.status()).toBe(200)
   await expect(settings.getByRole('checkbox', { exact: true, name: 'NES' })).toBeChecked()
   const enabledPreferences = await page.request.get('/api/v1/preference')
   expect(await enabledPreferences.json()).toMatchObject({ ui: { platforms: ['nes'] } })
   const counts = await mountedStatus()
-  expect(counts.platforms.find(function nes(platform) { return platform.platform === 'nes' })).toEqual({
-    indexed: 2, platform: 'nes', unsupported: 0,
+  expect(
+    counts.platforms.find(function nes(platform) {
+      return platform.platform === 'nes'
+    }),
+  ).toEqual({
+    indexed: 2,
+    platform: 'nes',
+    unsupported: 0,
   })
   await settings.getByRole('tab', { exact: true, name: 'ROM / Metadata' }).click()
   await expect(settings.getByTestId('mounted-library-status')).toBeVisible()
@@ -354,8 +377,10 @@ test('mounted sources remain immutable through content matching, settings, brows
       return new URL(response.url()).pathname === '/api/v1/mounted-library' && response.request().method() === 'PATCH'
     })
     await settings.getByRole('button', { exact: true, name: 'Save scan interval' }).click()
-    expect((await intervalResponse).status()).toBe(200)
-    expect((await mountedStatus()).settings.scanIntervalSeconds).toBe(Number(seconds))
+    const savedInterval = await intervalResponse
+    expect(savedInterval.status()).toBe(200)
+    const intervalStatus = await mountedStatus()
+    expect(intervalStatus.settings.scanIntervalSeconds).toBe(Number(seconds))
   }
   const automatic = settings.getByRole('switch', { exact: true, name: 'Automatic metadata and cover downloads' })
   await expect(automatic).toBeChecked()
@@ -363,69 +388,90 @@ test('mounted sources remain immutable through content matching, settings, brows
     return new URL(response.url()).pathname === '/api/v1/mounted-library' && response.request().method() === 'PATCH'
   })
   await automatic.click()
-  expect((await automaticResponse).status()).toBe(200)
+  const savedAutomatic = await automaticResponse
+  expect(savedAutomatic.status()).toBe(200)
   await expect(automatic).not.toBeChecked()
   expect(await mountedStatus()).toMatchObject({
     automaticMetadataEnabled: false,
     networkAllowed: true,
     settings: { automaticMetadata: false, scanIntervalSeconds: 0 },
   })
-  const reportDirectory = path.dirname(process.env.RETROASSEMBLY_MOUNTED_TEST_REPORT || 'node_modules/.cache/ci/built-image.json')
+  const reportDirectory = path.dirname(
+    process.env.RETROASSEMBLY_MOUNTED_TEST_REPORT || 'node_modules/.cache/ci/built-image.json',
+  )
   await fs.mkdir(reportDirectory, { recursive: true })
   await page.screenshot({ path: path.join(reportDirectory, 'mounted-metadata-settings.png') })
   const automaticCoverRequests: string[] = []
   const cachedPage = await page.context().newPage()
-  await cachedPage.route(/https:\/\/(?:thumbnails\.libretro\.com\/|cdn\.jsdelivr\.net\/gh\/libretro-thumbnails\/)/u, async function blockRemoteCover(route) {
-    automaticCoverRequests.push(route.request().url())
-    await route.abort()
-  })
+  await cachedPage.route(
+    /https:\/\/(?:thumbnails\.libretro\.com\/|cdn\.jsdelivr\.net\/gh\/libretro-thumbnails\/)/u,
+    async function blockRemoteCover(route) {
+      automaticCoverRequests.push(route.request().url())
+      await route.abort()
+    },
+  )
   await cachedPage.goto('/library/roms')
   await cachedPage.getByText('Archive Pulse — content metadata', { exact: true }).first().click()
   await cachedPage.goto('/library/roms')
   const cachedCover = cachedPage.locator(`img[src="/api/v1/files/${encodeURIComponent(coverFileId)}"]`).first()
   await expect(cachedCover).toBeVisible()
-  await expect.poll(async function renderedCachedCover() {
-    return await cachedCover.evaluate(function loaded(image) {
-      return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0
+  await expect
+    .poll(async function renderedCachedCover() {
+      return await cachedCover.evaluate(function loaded(image) {
+        return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0
+      })
     })
-  }).toBe(true)
+    .toBe(true)
   await cachedPage.close()
   expect(automaticCoverRequests).toEqual([])
-  expect(providerMatches()).toBe(beforeNavigationMatches)
+  expect(providerMatches(provider)).toBe(beforeNavigationMatches)
   const afterNavigation = await mountedStatus()
   expect(afterNavigation.lastScanStartedAt).toBe(beforeNavigation.lastScanStartedAt)
   expect(afterNavigation.lastScanFinishedAt).toBe(beforeNavigation.lastScanFinishedAt)
-  expect((await findRom()).mountedSource.identification).toEqual(rawIdentification)
-  expect((await findArchive()).mountedSource.identification).toEqual(archiveIdentification)
+  expect(await identificationCache()).toEqual(initialIdentification)
 
   const refreshResponse = page.waitForResponse(function refreshed(response) {
-    return new URL(response.url()).pathname === '/api/v1/mounted-library/metadata' && response.request().method() === 'POST'
+    return (
+      new URL(response.url()).pathname === '/api/v1/mounted-library/metadata' && response.request().method() === 'POST'
+    )
   })
   await settings.getByRole('button', { exact: true, name: 'Refresh metadata' }).click()
-  expect((await refreshResponse).status()).toBe(200)
+  const refreshed = await refreshResponse
+  expect(refreshed.status()).toBe(200)
   await metadataIdle()
-  expect(providerMatches()).toBeGreaterThan(beforeNavigationMatches)
-  expect((await mountedStatus()).metadata.operation).toBe('metadata')
-  expect((await findArchive()).mountedSource.identification).toEqual(archiveIdentification)
+  expect(providerMatches(provider)).toBeGreaterThan(beforeNavigationMatches)
+  const metadataStatus = await mountedStatus()
+  expect(metadataStatus.metadata.operation).toBe('metadata')
+  expect(await identificationCache()).toEqual(initialIdentification)
   const retryResponse = page.waitForResponse(function retried(response) {
-    return new URL(response.url()).pathname === '/api/v1/mounted-library/artwork' && response.request().method() === 'POST'
+    return (
+      new URL(response.url()).pathname === '/api/v1/mounted-library/artwork' && response.request().method() === 'POST'
+    )
   })
   await settings.getByRole('button', { exact: true, name: 'Retry missing covers' }).click()
-  expect((await retryResponse).status()).toBe(200)
+  const retriedArtwork = await retryResponse
+  expect(retriedArtwork.status()).toBe(200)
   await metadataIdle()
-  expect((await mountedStatus()).metadata.operation).toBe('artwork')
-  const beforeExplicitScanMatches = providerMatches()
+  const artworkStatus = await mountedStatus()
+  expect(artworkStatus.metadata.operation).toBe('artwork')
+  const beforeExplicitScanMatches = providerMatches(provider)
   const scanResponse = page.waitForResponse(function scanned(response) {
     return new URL(response.url()).pathname === '/api/v1/mounted-library' && response.request().method() === 'POST'
   })
   await settings.getByRole('button', { exact: true, name: 'Scan ROM folders' }).click()
-  expect((await scanResponse).status()).toBe(200)
-  await expect.poll(async function scanFinished() { return (await mountedStatus()).running }).toBe(false)
+  const scanned = await scanResponse
+  expect(scanned.status()).toBe(200)
+  await expect
+    .poll(async function scanFinished() {
+      const status = await mountedStatus()
+      return status.running
+    })
+    .toBe(false)
   await metadataIdle()
-  expect(providerMatches()).toBe(beforeExplicitScanMatches)
-  expect((await mountedStatus()).indexed).toBe(2)
-  expect((await findRom()).mountedSource.identification).toEqual(rawIdentification)
-  expect((await findArchive()).mountedSource.identification).toEqual(archiveIdentification)
+  expect(providerMatches(provider)).toBe(beforeExplicitScanMatches)
+  const scanStatus = await mountedStatus()
+  expect(scanStatus.indexed).toBe(2)
+  expect(await identificationCache()).toEqual(initialIdentification)
   expect(await findRom()).toMatchObject({
     gameBoxartFileIds: coverFileId,
     gameName: override,
@@ -435,7 +481,7 @@ test('mounted sources remain immutable through content matching, settings, brows
   await settings.getByTitle('Close', { exact: true }).click()
   await page.goto('/library/roms')
   await page.getByText(override, { exact: true }).first().click()
-  const beforeRestartMatches = providerMatches()
+  const beforeRestartMatches = providerMatches(provider)
 
   for (let restart = 0; restart < 2; restart += 1) {
     execFileSync('docker', ['restart', container], { encoding: 'utf8' })
@@ -458,9 +504,10 @@ test('mounted sources remain immutable through content matching, settings, brows
       automaticMetadataEnabled: false,
       settings: { automaticMetadata: false, scanIntervalSeconds: 0 },
     })
-    expect((await findArchive()).id).toBe(archive.id)
-    expect((await findArchive()).mountedSource.identification).toEqual(archiveIdentification)
-    expect(providerMatches()).toBe(beforeRestartMatches)
+    const persistedArchive = await findArchive()
+    expect(persistedArchive.id).toBe(archive.id)
+    expect(persistedArchive.mountedSource.identification).toEqual(archiveIdentification)
+    expect(providerMatches(provider)).toBe(beforeRestartMatches)
     const persistedRom = await findRom()
     expect(persistedRom.mountedSource.identification).toEqual(rawIdentification)
     expect(persistedRom.id).toBe(rom.id)
@@ -480,8 +527,12 @@ test('mounted sources remain immutable through content matching, settings, brows
   await page.reload()
   const restartedSettings = await openSettings()
   await restartedSettings.getByRole('tab', { exact: true, name: 'ROM / Metadata' }).click()
-  await expect(restartedSettings.getByRole('switch', { exact: true, name: 'Automatic metadata and cover downloads' })).not.toBeChecked()
-  await expect(restartedSettings.getByRole('spinbutton', { exact: true, name: 'Scan interval (seconds)' })).toHaveValue('0')
+  await expect(
+    restartedSettings.getByRole('switch', { exact: true, name: 'Automatic metadata and cover downloads' }),
+  ).not.toBeChecked()
+  await expect(restartedSettings.getByRole('spinbutton', { exact: true, name: 'Scan interval (seconds)' })).toHaveValue(
+    '0',
+  )
   await restartedSettings.getByTitle('Close', { exact: true }).click()
   await page.getByText(/^continue$/iu).click()
   await expect(canvas).toBeVisible({ timeout: 90_000 })
@@ -502,25 +553,26 @@ test('mounted sources remain immutable through content matching, settings, brows
       { timeout: 15_000 },
     )
     .not.toBe(resumedFrame)
+  const finalStatus = await mountedStatus()
   await fs.writeFile(
     process.env.RETROASSEMBLY_MOUNTED_TEST_BROWSER_REPORT || '',
     JSON.stringify({
       automaticCoverRequests,
-      automaticMetadata: (await mountedStatus()).settings.automaticMetadata,
+      automaticMetadata: finalStatus.settings.automaticMetadata,
       biosPlatforms,
       canvasFrames: [firstFrame, changedFrame],
       coreRequests,
       cover: { fileId: coverFileId, sha256: hash(coverBytes) },
       crossOriginIsolated: await page.evaluate(() => crossOriginIsolated),
+      platformCounts: counts.platforms,
+      providerMatches: providerMatches(provider),
       restarts: 2,
       resumedCanvasFrames: [resumedFrame, resumedChangedFrame],
       romId: rom.id,
       sourceRequests,
-      platformCounts: counts.platforms,
-      providerMatches: providerMatches(),
-      zip: { identification: archiveIdentification, romId: archive.id },
       state: { fileId: state.fileId, sha256: hash(stateBytes) },
       wasmInstances: await page.evaluate(() => Number(Reflect.get(globalThis, 'mountedLibraryWasmInstances'))),
+      zip: { identification: archiveIdentification, romId: archive.id },
     }),
   )
 })
