@@ -133,18 +133,20 @@ async function writeFixture(root: string, relative: string, bytes: string | Uint
 function trackFileHandles(t: TestContext, configure?: (handle: FileHandle) => void) {
   const opened: { closeCalls: number; handle: FileHandle }[] = []
   const nativeOpen = fs.open
-  t.mock.method(fs, 'open', async function (...args: Parameters<typeof fs.open>) {
+  async function trackOpen(...args: Parameters<typeof fs.open>) {
     const handle = await nativeOpen(...args)
     const record = { closeCalls: 0, handle }
-    const close = handle.close
-    t.mock.method(handle, 'close', async function () {
+    const { close } = handle
+    async function trackClose() {
       record.closeCalls += 1
       await close()
-    })
+    }
+    t.mock.method(handle, 'close', trackClose)
     opened.push(record)
     configure?.(handle)
     return handle
-  })
+  }
+  t.mock.method(fs, 'open', trackOpen)
   syncBuiltinESMExports()
   t.after(function restoreFileHandleMocks() {
     t.mock.restoreAll()
@@ -599,9 +601,10 @@ await describe('mounted shared library', async () => {
     const f = await fixture(t, { ...defaultFiles, 'bios/nes.pal': 'synthetic palette' })
     const readError = new Error('Synthetic mounted read failure')
     const opened = trackFileHandles(t, function failRead(handle) {
-      t.mock.method(handle, 'read', async function () {
-        throw readError
-      })
+      function rejectRead() {
+        return Promise.reject(readError)
+      }
+      t.mock.method(handle, 'read', rejectRead)
     })
     for (const fileId of [getMountedFileId('bios', 'nes.pal'), getMountedFileId('roms', 'NES/Nested/雪 & Hero.NES')]) {
       const file = await f.mounted.readFile(fileId)
@@ -616,16 +619,17 @@ await describe('mounted shared library', async () => {
 
   await it('bounds mounted ROM chunks and closes once when cancelling an in-flight response read', async (t) => {
     const f = await fixture(t, { 'roms/NES/Large.nes': new Uint8Array(1024 * 1024).fill(42) })
-    const started = Promise.withResolvers<void>()
-    const finished = Promise.withResolvers<void>()
+    const started = Promise.withResolvers<undefined>()
+    const finished = Promise.withResolvers<undefined>()
     let deferRead = false
     const opened = trackFileHandles(t, function delayRead(handle) {
       if (deferRead) {
-        t.mock.method(handle, 'read', async function () {
-          started.resolve()
+        async function readAfterCancellation() {
+          started.resolve(undefined)
           await finished.promise
           throw new Error('Pending mounted read failed after cancellation')
-        })
+        }
+        t.mock.method(handle, 'read', readAfterCancellation)
       }
     })
     const fileId = getMountedFileId('roms', 'NES/Large.nes')
@@ -644,7 +648,7 @@ await describe('mounted shared library', async () => {
     const pending = pendingReader.read()
     await started.promise
     const cancellation = pendingReader.cancel('browser disconnected')
-    finished.resolve()
+    finished.resolve(undefined)
     await cancellation
     assert.deepEqual(await pending, { done: true, value: undefined })
     pendingReader.releaseLock()

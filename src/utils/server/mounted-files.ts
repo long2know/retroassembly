@@ -208,29 +208,6 @@ export function createMountedFileStream(handle: FileHandle, signal?: AbortSignal
 
   // A failed native readableWebStream retains an internal handle reference, so own reads and cleanup here.
   return new ReadableStream<Uint8Array>({
-    start(controller) {
-      if (!signal) {
-        return
-      }
-      async function closeOnAbort() {
-        cancelled = true
-        try {
-          await close()
-        } catch (error) {
-          controller.error(error)
-          return
-        }
-        controller.error(signal?.reason)
-      }
-      function abort() {
-        void closeOnAbort()
-      }
-      onAbort = abort
-      signal.addEventListener('abort', onAbort, { once: true })
-      if (signal.aborted) {
-        abort()
-      }
-    },
     async cancel() {
       cancelled = true
       await close()
@@ -256,6 +233,29 @@ export function createMountedFileStream(handle: FileHandle, signal?: AbortSignal
       } catch (error) {
         await close()
         throw error
+      }
+    },
+    start(controller) {
+      if (!signal) {
+        return
+      }
+      async function closeOnAbort() {
+        cancelled = true
+        try {
+          await close()
+        } catch (error) {
+          controller.error(error)
+          return
+        }
+        controller.error(signal?.reason)
+      }
+      function abort() {
+        return closeOnAbort()
+      }
+      onAbort = abort
+      signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) {
+        return abort()
       }
     },
   })
