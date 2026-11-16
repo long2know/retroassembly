@@ -25,7 +25,7 @@ interface MountedLibraryRuntime {
   refreshMetadata: (options?: { platform?: PlatformName; retryArtwork?: boolean }) => MountedLibraryStatus
   retryArtwork: (options?: { platform?: PlatformName }) => MountedLibraryStatus
   updateSettings: (settings: Partial<MountedLibrarySettings>) => MountedLibraryStatus
-  readFile: (id: string) => Promise<{ body: ReadableStream; httpEtag: string; size: number }>
+  readFile: (id: string, signal?: AbortSignal) => Promise<{ body: ReadableStream; httpEtag: string; size: number }>
   scan: () => Promise<MountedScanStatus>
   scheduleEnrichment: () => void
   stop: () => void

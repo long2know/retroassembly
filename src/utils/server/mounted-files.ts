@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
-import { access, lstat, open, readdir, realpath, stat } from 'node:fs/promises'
+import { access, lstat, open, readdir, realpath, stat, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { getRuntimeKey } from 'hono/adapter'
 import { getDirectories, getRunTimeEnv, isMountedLibraryEnabled } from '#@/constants/env.ts'
@@ -191,6 +191,74 @@ export async function getMountedFileInfo(root: MountedRoot, relative: string) {
   const { handle, revision, size } = await openMountedFile(root, relative)
   await handle.close()
   return { revision, size }
+}
+
+export function createMountedFileStream(handle: FileHandle, signal?: AbortSignal) {
+  let cancelled = false
+  let closing: Promise<void> | undefined
+  let onAbort: (() => void) | undefined
+
+  function close() {
+    if (onAbort) {
+      signal?.removeEventListener('abort', onAbort)
+    }
+    closing ??= handle.close()
+    return closing
+  }
+
+  // A failed native readableWebStream retains an internal handle reference, so own reads and cleanup here.
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (!signal) {
+        return
+      }
+      async function closeOnAbort() {
+        cancelled = true
+        try {
+          await close()
+        } catch (error) {
+          controller.error(error)
+          return
+        }
+        controller.error(signal?.reason)
+      }
+      function abort() {
+        void closeOnAbort()
+      }
+      onAbort = abort
+      signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) {
+        abort()
+      }
+    },
+    async cancel() {
+      cancelled = true
+      await close()
+    },
+    async pull(controller) {
+      if (cancelled) {
+        return
+      }
+      try {
+        const buffer = new Uint8Array(64 * 1024)
+        const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, null)
+        if (cancelled) {
+          return
+        }
+        if (bytesRead) {
+          controller.enqueue(buffer.subarray(0, bytesRead))
+        } else {
+          await close()
+          if (!cancelled) {
+            controller.close()
+          }
+        }
+      } catch (error) {
+        await close()
+        throw error
+      }
+    },
+  })
 }
 
 export async function* walkMountedFiles(root: MountedRoot, relative = '', systemsOnly = false): AsyncGenerator<string> {

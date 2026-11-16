@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
-import { link, mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import fs, {
+  link,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+  type FileHandle,
+} from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import path from 'node:path'
 import { describe, it, type TestContext } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -116,6 +128,29 @@ async function writeFixture(root: string, relative: string, bytes: string | Uint
   const filename = path.join(root, relative)
   await mkdir(path.dirname(filename), { recursive: true })
   await writeFile(filename, bytes)
+}
+
+function trackFileHandles(t: TestContext, configure?: (handle: FileHandle) => void) {
+  const opened: { closeCalls: number; handle: FileHandle }[] = []
+  const nativeOpen = fs.open
+  t.mock.method(fs, 'open', async function (...args: Parameters<typeof fs.open>) {
+    const handle = await nativeOpen(...args)
+    const record = { closeCalls: 0, handle }
+    const close = handle.close
+    t.mock.method(handle, 'close', async function () {
+      record.closeCalls += 1
+      await close()
+    })
+    opened.push(record)
+    configure?.(handle)
+    return handle
+  })
+  syncBuiltinESMExports()
+  t.after(function restoreFileHandleMocks() {
+    t.mock.restoreAll()
+    syncBuiltinESMExports()
+  })
+  return opened
 }
 
 async function sourceSnapshot(root: string, relative = '') {
@@ -532,6 +567,112 @@ await describe('mounted shared library', async () => {
     const arbitraryId = getMountedFileId('bios', 'private.txt')
     await expectStatus(f.request(`/files/${encodeURIComponent(arbitraryId)}`), 404)
     assert.deepEqual(await sourceSnapshot(f.bios), before)
+  })
+
+  await it('closes mounted BIOS handles after responses, HEAD probes, stream cancellation, and request aborts', async (t) => {
+    const palette = new Uint8Array(192).fill(37)
+    const f = await fixture(t, { ...defaultFiles, 'bios/nes.pal': palette })
+    const before = await sourceSnapshot(f.bios)
+    const opened = trackFileHandles(t)
+    const fileId = getMountedFileId('bios', 'nes.pal')
+    for (const method of ['GET', 'HEAD']) {
+      const response = await f.request(`/files/${encodeURIComponent(fileId)}`, { method })
+      assert.equal(response.status, 200)
+      assert.equal(response.headers.get('Content-Length'), `${palette.byteLength}`)
+      assert.deepEqual(new Uint8Array(await response.arrayBuffer()), method === 'HEAD' ? new Uint8Array(0) : palette)
+    }
+    const cancelled = await f.mounted.readFile(fileId)
+    await cancelled.body.cancel('browser left')
+    const abort = new AbortController()
+    const abandoned = await f.request(`/files/${encodeURIComponent(fileId)}`, { signal: abort.signal })
+    abort.abort()
+    await assert.rejects(abandoned.arrayBuffer(), { name: 'AbortError' })
+    assert.equal(opened.length, 4)
+    for (const { closeCalls, handle } of opened) {
+      assert.equal(handle.fd, -1)
+      assert.equal(closeCalls, 1)
+    }
+    assert.deepEqual(await sourceSnapshot(f.bios), before)
+  })
+
+  await it('closes mounted BIOS and ROM handles before reporting response read failures', async (t) => {
+    const f = await fixture(t, { ...defaultFiles, 'bios/nes.pal': 'synthetic palette' })
+    const readError = new Error('Synthetic mounted read failure')
+    const opened = trackFileHandles(t, function failRead(handle) {
+      t.mock.method(handle, 'read', async function () {
+        throw readError
+      })
+    })
+    for (const fileId of [getMountedFileId('bios', 'nes.pal'), getMountedFileId('roms', 'NES/Nested/雪 & Hero.NES')]) {
+      const file = await f.mounted.readFile(fileId)
+      await assert.rejects(new Response(file.body).arrayBuffer(), readError)
+    }
+    assert.equal(opened.length, 2)
+    for (const { closeCalls, handle } of opened) {
+      assert.equal(handle.fd, -1)
+      assert.equal(closeCalls, 1)
+    }
+  })
+
+  await it('bounds mounted ROM chunks and closes once when cancelling an in-flight response read', async (t) => {
+    const f = await fixture(t, { 'roms/NES/Large.nes': new Uint8Array(1024 * 1024).fill(42) })
+    const started = Promise.withResolvers<void>()
+    const finished = Promise.withResolvers<void>()
+    let deferRead = false
+    const opened = trackFileHandles(t, function delayRead(handle) {
+      if (deferRead) {
+        t.mock.method(handle, 'read', async function () {
+          started.resolve()
+          await finished.promise
+          throw new Error('Pending mounted read failed after cancellation')
+        })
+      }
+    })
+    const fileId = getMountedFileId('roms', 'NES/Large.nes')
+    const file = await f.mounted.readFile(fileId)
+    const reader = file.body.getReader()
+    const first = await reader.read()
+    assert.ok(first.value)
+    assert.ok(first.value.byteLength > 0 && first.value.byteLength <= 64 * 1024)
+    assert.ok(first.value.every((byte) => byte === 42))
+    await reader.cancel('only the first chunk was needed')
+    reader.releaseLock()
+
+    deferRead = true
+    const pendingFile = await f.mounted.readFile(fileId)
+    const pendingReader = pendingFile.body.getReader()
+    const pending = pendingReader.read()
+    await started.promise
+    const cancellation = pendingReader.cancel('browser disconnected')
+    finished.resolve()
+    await cancellation
+    assert.deepEqual(await pending, { done: true, value: undefined })
+    pendingReader.releaseLock()
+    assert.equal(opened.length, 2)
+    for (const { closeCalls, handle } of opened) {
+      assert.equal(handle.fd, -1)
+      assert.equal(closeCalls, 1)
+    }
+  })
+
+  await it('closes an opened mounted BIOS handle when response stream setup fails', async (t) => {
+    const f = await fixture(t, { ...defaultFiles, 'bios/nes.pal': 'synthetic palette' })
+    const opened = trackFileHandles(t)
+    const setupError = new Error('Synthetic stream setup failure')
+    class FailingReadableStream<Chunk> extends ReadableStream<Chunk> {
+      constructor() {
+        super()
+        throw setupError
+      }
+    }
+    t.mock.property(globalThis, 'ReadableStream', FailingReadableStream)
+    await assert.rejects(f.mounted.readFile(getMountedFileId('bios', 'nes.pal')), {
+      cause: setupError,
+      status: 503,
+    })
+    assert.equal(opened.length, 1)
+    assert.equal(opened[0].handle.fd, -1)
+    assert.equal(opened[0].closeCalls, 1)
   })
 
   await it('rejects source traversal, symlinks, overlapping writable roots, and mounted writes/deletes', async (t) => {
