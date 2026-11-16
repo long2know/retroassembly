@@ -16,6 +16,7 @@ import type { createDrizzle } from './drizzle.ts'
 import {
   assertMountedRootAvailable,
   canonicalLocation,
+  createMountedFileStream,
   getMountedConfiguration,
   getMountedFileId,
   getMountedFileInfo,
@@ -302,7 +303,7 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
     }
   }
 
-  async function readFile(id: string) {
+  async function readFile(id: string, signal?: AbortSignal) {
     if (!/^mounted\/(?:roms|bios)\/[a-f0-9]{64}$/u.test(id)) {
       throw new HTTPException(400, { message: 'Invalid mounted file ID' })
     }
@@ -335,29 +336,18 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
     }
     try {
       const file = await openMountedFile(root, relative)
-      if (revision !== file.revision) {
+      try {
+        if (revision !== file.revision) {
+          throw new HTTPException(409, { message: 'Mounted file changed; rescan the mounted library before loading' })
+        }
+        return {
+          body: createMountedFileStream(file.handle, signal),
+          httpEtag: `"${file.revision}"`,
+          size: file.size,
+        }
+      } catch (error) {
         await file.handle.close()
-        throw new HTTPException(409, { message: 'Mounted file changed; rescan the mounted library before loading' })
-      }
-      const reader = file.handle.readableWebStream({ autoClose: true }).getReader()
-      return {
-        body: new ReadableStream<Uint8Array>({
-          async cancel(reason) {
-            await reader.cancel(reason)
-            reader.releaseLock()
-          },
-          async pull(controller) {
-            const result = await reader.read()
-            if (result.done) {
-              reader.releaseLock()
-              controller.close()
-            } else {
-              controller.enqueue(new Uint8Array(result.value))
-            }
-          },
-        }),
-        httpEtag: `"${file.revision}"`,
-        size: file.size,
+        throw error
       }
     } catch (error) {
       if (error instanceof HTTPException) {

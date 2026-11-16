@@ -113,7 +113,7 @@ export function createStorage() {
     if (!library) {
       throw new HTTPException(503, { message: 'Mounted library is not initialized' })
     }
-    return await library.readFile(id)
+    return await library.readFile(id, c.req.raw.signal)
   }
 
   return {
