@@ -4,7 +4,6 @@
 !.env.example
 !.env.sample
 !.env.template
-.squad/
 /artifacts/
 /tooling/
 .react-router
@@ -20,3 +19,17 @@ test-results
 tests/e2e/fixtures/files
 tests/.mounted-library-fixtures
 wrangler.json
+# Squad: ignore runtime state (logs, inbox, sessions)
+# Note: .squad/casting/* is identity and MUST be committed to main, not ignored
+.squad/orchestration-log/
+.squad/log/
+.squad/decisions/inbox/
+.squad/sessions/
+.squad/.scratch/
+.squad/.cache/
+.squad/.first-run
+.squad/memory/audit.jsonl
+.squad/casting/*.lock
+.squad/casting/registry-history.transaction.json
+# Squad: SubSquad activation file (local to this machine)
+.squad-workstream
