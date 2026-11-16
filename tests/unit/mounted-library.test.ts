@@ -600,10 +600,10 @@ await describe('mounted shared library', async () => {
   await it('closes mounted BIOS and ROM handles before reporting response read failures', async (t) => {
     const f = await fixture(t, { ...defaultFiles, 'bios/nes.pal': 'synthetic palette' })
     const readError = new Error('Synthetic mounted read failure')
+    function rejectRead() {
+      return Promise.reject(readError)
+    }
     const opened = trackFileHandles(t, function failRead(handle) {
-      function rejectRead() {
-        return Promise.reject(readError)
-      }
       t.mock.method(handle, 'read', rejectRead)
     })
     for (const fileId of [getMountedFileId('bios', 'nes.pal'), getMountedFileId('roms', 'NES/Nested/雪 & Hero.NES')]) {
@@ -622,13 +622,13 @@ await describe('mounted shared library', async () => {
     const started = Promise.withResolvers<undefined>()
     const finished = Promise.withResolvers<undefined>()
     let deferRead = false
+    async function readAfterCancellation() {
+      started.resolve(undefined)
+      await finished.promise
+      throw new Error('Pending mounted read failed after cancellation')
+    }
     const opened = trackFileHandles(t, function delayRead(handle) {
       if (deferRead) {
-        async function readAfterCancellation() {
-          started.resolve(undefined)
-          await finished.promise
-          throw new Error('Pending mounted read failed after cancellation')
-        }
         t.mock.method(handle, 'read', readAfterCancellation)
       }
     })
