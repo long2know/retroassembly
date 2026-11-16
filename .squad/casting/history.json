@@ -1,0 +1,23 @@
+{
+  "assignment_cast_snapshots": {
+    "repl-cast-r2-2026-11-16T18:42:30.279Z": {
+      "created_at": "2026-11-16T18:42:30.279Z",
+      "agents": [
+        "lead",
+        "library",
+        "browser",
+        "platform",
+        "quality"
+      ],
+      "universe": "descriptive"
+    }
+  },
+  "universe_usage_history": [
+    {
+      "universe": "descriptive",
+      "used_at": "2026-11-16T18:42:30.279Z"
+    }
+  ],
+  "transaction_id": "07b47ef6-98af-4bff-a788-1d9889695e4d",
+  "registry_revision": 2
+}
