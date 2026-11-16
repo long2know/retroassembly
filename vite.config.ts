@@ -68,6 +68,8 @@ export default defineConfig(async (env) => {
     build: { chunkSizeWarningLimit: 1024 },
     clearScreen: false,
     envPrefix: 'RETROASSEMBLY_BUILD_TIME_VITE_',
+    fmt: { ignorePatterns: ['.squad/**'] },
+    lint: { ignorePatterns: ['.squad/**'] },
     pack: {
       clean: false,
       entry: ['scripts/serve.ts', 'src/server/node.ts'],

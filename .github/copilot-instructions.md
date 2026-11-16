@@ -1,4 +1,5 @@
 <!-- squad:copilot-instructions:start -->
+
 # Copilot Coding Agent — Squad Instructions
 
 You are working on a project that uses **Squad**, an AI team framework. When picking up issues autonomously, follow these guidelines.
@@ -14,6 +15,7 @@ Inspect your `agent_instructions` for the coordinator canaries. This is a **two-
 3. If the HEAD canary `SQUAD_COORDINATOR_CANARY_HEAD_b7d2` is **present** but the EOF canary `SQUAD_COORDINATOR_CANARY_a8f3` is **absent**, the coordinator prompt loaded but was **truncated** before the end.
 
 **When the coordinator prompt is truncated, you MUST:**
+
 1. **STOP** — do not proceed with standard Squad behavior.
 2. **WARN the user** with this exact message:
    ```
@@ -43,9 +45,11 @@ Before starting work, check your capability profile in `.squad/team.md` under th
 ## Branch Naming
 
 Use this fork's branch convention:
+
 ```
 stlong/{kebab-case-slug}
 ```
+
 Example: `stlong/fix-mounted-metadata`.
 
 Branch from current `main` and open focused PRs targeting `main`. This fork does not use the Squad product's `dev`/`insiders` branching model.
@@ -53,6 +57,7 @@ Branch from current `main` and open focused PRs targeting `main`. This fork does
 ## PR Guidelines
 
 When opening a PR:
+
 - Reference an actual issue when one exists; do not invent one when issues are disabled.
 - If the issue had a `squad:{member}` label, mention the member: `Working as {member} ({role})`
 - If this is a 🟡 needs-review task, add to the PR description: `⚠️ This task was flagged as "needs review" — please have a squad member review before merging.`
@@ -63,8 +68,10 @@ When opening a PR:
 ## Decisions
 
 If you make a decision that affects other team members, write it to:
+
 ```
 .squad/decisions/inbox/copilot-{brief-slug}.md
 ```
+
 The Scribe will merge it into the shared decisions file.
 <!-- squad:copilot-instructions:end -->

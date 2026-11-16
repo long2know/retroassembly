@@ -24,6 +24,7 @@ Analyze conversations and propose improvements to squad knowledge based on what 
 3. **`reflect` skill** — Identifies learnings that may warrant either runtime memory or an approved tracked behavior change
 
 **Workflow:**
+
 - Use `reflect` during work to capture learnings
 - At session end, review captured learnings
 - Persist evidence through governed runtime memory when available
@@ -36,26 +37,26 @@ Analyze conversations and propose improvements to squad knowledge based on what 
 
 ### 🔴 HIGH Priority (Invoke Immediately)
 
-| Trigger | Example | Why Critical |
-|---------|---------|--------------|
-| User correction | "no", "wrong", "not like that", "never do" | Captures mistakes to prevent repetition |
+| Trigger               | Example                                      | Why Critical                                    |
+| --------------------- | -------------------------------------------- | ----------------------------------------------- |
+| User correction       | "no", "wrong", "not like that", "never do"   | Captures mistakes to prevent repetition         |
 | Architectural insight | "you removed that without understanding why" | Documents design decisions (Chesterton's Fence) |
-| Immediate fixes | "debug", "root cause", "fix all" | Learns from errors in real-time |
+| Immediate fixes       | "debug", "root cause", "fix all"             | Learns from errors in real-time                 |
 
 ### 🟡 MEDIUM Priority (Invoke After Multiple)
 
-| Trigger | Example | Why Important |
-|---------|---------|---------------|
-| User praise | "perfect", "exactly", "great" | Reinforces successful patterns |
-| Tool preferences | "use X instead of Y", "prefer" | Builds workflow preferences |
-| Edge cases | "what if X happens?", "don't forget", "ensure" | Captures scenarios to handle |
+| Trigger          | Example                                        | Why Important                  |
+| ---------------- | ---------------------------------------------- | ------------------------------ |
+| User praise      | "perfect", "exactly", "great"                  | Reinforces successful patterns |
+| Tool preferences | "use X instead of Y", "prefer"                 | Builds workflow preferences    |
+| Edge cases       | "what if X happens?", "don't forget", "ensure" | Captures scenarios to handle   |
 
 ### 🟢 LOW Priority (Invoke at Session End)
 
-| Trigger | Example | Why Useful |
-|---------|---------|------------|
-| Repeated patterns | Frequent use of specific commands/tools | Identifies workflow preferences |
-| Session end | After complex work | Consolidates all session learnings |
+| Trigger           | Example                                 | Why Useful                         |
+| ----------------- | --------------------------------------- | ---------------------------------- |
+| Repeated patterns | Frequent use of specific commands/tools | Identifies workflow preferences    |
+| Session end       | After complex work                      | Consolidates all session learnings |
 
 ---
 
@@ -78,11 +79,13 @@ Scan for learning signals with confidence levels:
 User actively steered or corrected output.
 
 **Detection patterns:**
+
 - Explicit rejection: "no", "not like that", "that's wrong"
 - Strong directives: "never do", "always do", "don't ever"
 - User provided alternative implementation
 
 **Example:**
+
 ```text
 User: "No, use the azure-devops MCP tool instead of raw API calls"
 → [HIGH] + Add constraint: "Prefer azure-devops MCP tools over REST API"
@@ -93,11 +96,13 @@ User: "No, use the azure-devops MCP tool instead of raw API calls"
 Output was accepted or praised.
 
 **Detection patterns:**
+
 - Explicit praise: "perfect", "great", "yes", "exactly"
 - User built on output without modification
 - Output was committed without changes
 
 **Example:**
+
 ```text
 User: "Perfect, that's exactly what I needed"
 → [MED] + Add preference: "Include usage examples in documentation"
@@ -108,6 +113,7 @@ User: "Perfect, that's exactly what I needed"
 Scenarios not anticipated.
 
 **Detection patterns:**
+
 - Questions not answered
 - Workarounds user had to apply
 - Error handling gaps discovered
@@ -146,12 +152,12 @@ Present findings:
 
 **Confidence Threshold:**
 
-| Threshold | Action |
-|-----------|--------|
+| Threshold      | Action                                     |
+| -------------- | ------------------------------------------ |
 | ≥1 HIGH signal | Always propose (user explicitly corrected) |
-| ≥2 MED signals | Propose (sufficient pattern) |
-| ≥3 LOW signals | Propose (accumulated evidence) |
-| 1-2 LOW only | Skip (insufficient evidence) |
+| ≥2 MED signals | Propose (sufficient pattern)               |
+| ≥3 LOW signals | Propose (accumulated evidence)             |
+| 1-2 LOW only   | Skip (insufficient evidence)               |
 
 ### Phase 4: Persist Learnings
 
@@ -178,12 +184,14 @@ After user approval:
 ### Example 1: User Correction
 
 **Conversation:**
+
 ```
 Agent: "I'll use grep to search the repository"
 User: "No, use the code search tools first, grep is too slow"
 ```
 
 **Reflection Output:**
+
 ```
 [HIGH] + Add constraint: "Use code intelligence tools before grep"
   Source: "No, use the code search tools first, grep is too slow"
@@ -194,12 +202,14 @@ User: "No, use the code search tools first, grep is too slow"
 ### Example 2: Success Pattern
 
 **Conversation:**
+
 ```
 Agent: [Creates PR with detailed description and test plan]
 User: "Perfect! This is exactly the format I want for all PRs"
 ```
 
 **Reflection Output:**
+
 ```
 [MED] + Add preference: "Include test plan in PR descriptions"
   Source: User praised detailed PR format
@@ -212,6 +222,7 @@ User: "Perfect! This is exactly the format I want for all PRs"
 ## When to Use
 
 ✅ **Use reflect when:**
+
 - User says "no", "wrong", "not like that" (HIGH priority)
 - User says "perfect", "exactly", "great" (MED priority)
 - You discover edge cases or gaps
@@ -219,6 +230,7 @@ User: "Perfect! This is exactly the format I want for all PRs"
 - At end of sprint/milestone to consolidate patterns
 
 ❌ **Don't use reflect when:**
+
 - Simple one-off questions with no pattern
 - User is just exploring ideas (no concrete decisions)
 - Learning is already captured in history.md/decisions.md

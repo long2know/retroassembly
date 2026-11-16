@@ -30,6 +30,12 @@
 
 **Why:** Retain the maintainer's stated workflow preferences across team handoffs.
 
+### 2026-11-16: Separate generated Squad state from application tooling
+
+**What:** Keep the versioned `.squad/` framework/state tree outside application linting and formatting through Vite+'s `lint.ignorePatterns` and `fmt.ignorePatterns`. Retain all shared application defaults, type checks, rules and zero-diagnostic acceptance requirements. Active `.github/` integration remains formatted by the application checker.
+
+**Why:** Tracking team/history must not turn bundled CommonJS framework templates into application code or reformat the SDK's transaction-checksummed casting registry/history. Validate that state with `squad health` and `squad doctor` instead of independently reserializing it.
+
 ## Governance
 
 - The coordinator records accepted decisions; agents propose changes without rewriting this ledger.
