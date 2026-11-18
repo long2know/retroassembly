@@ -41,3 +41,15 @@
 - The coordinator records accepted decisions; agents propose changes without rewriting this ledger.
 - Select one accountable owner and bounded collaboration, not whole-team consensus for routine work.
 - Keep histories focused on evidence and learnings, and decisions focused on accepted direction.
+
+## Deployment Decisions
+
+### 2026-11-18: Runtime BASE_URL subpath support
+
+**What:** Accept a path-only `BASE_URL` from Docker Compose at container startup, without rebuilding the image. Unset, empty and `/` retain root deployment; valid single and nested prefixes are supported. Reject malformed origins, queries/fragments, traversal and ambiguous path segments explicitly. Reverse proxies preserve the configured prefix.
+
+**Implementation contract:** Use shared application/public URL helpers, supported relative Vite assets and a fresh runtime React Router build/asset manifest. Keep browser configuration limited to the public base path. Prefix app-owned routes, APIs, files, authentication redirects/cookies and PWA metadata; do not rebase external providers/CDNs. Validate return paths again after stripping the public prefix. Workers retain root behavior.
+
+**Preserve:** Existing immutable ROM/BIOS mounts, private activity, uploaded libraries, app-owned metadata/artwork/saves, source/image identity and strict publication gates. No storage reset, new image per prefix or live deployment changes are required.
+
+**Evidence requirement:** PR #3 must pass the same production image at root and a nested prefix, including actual browser routing/assets, login/logout, gameplay, read-only sources and restart persistence, before release. Unit/source checks alone are not deployment approval.

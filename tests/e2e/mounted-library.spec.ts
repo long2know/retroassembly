@@ -79,6 +79,7 @@ test('mounted sources remain immutable through content matching, settings, brows
   }
   const deployment = new URL(process.env.RETROASSEMBLY_MOUNTED_TEST_URL || '')
   const basePath = deployment.pathname.replace(/\/$/u, '')
+  const applicationMenu = page.locator('button[aria-label="Menu"][aria-haspopup="menu"]')
   function appPath(pathname: string) {
     return `${basePath}${pathname}`
   }
@@ -136,10 +137,7 @@ test('mounted sources remain immutable through content matching, settings, brows
   }
 
   async function openSettings() {
-    await page
-      .getByRole('button', { exact: true, name: 'Menu' })
-      .and(page.locator('[aria-haspopup="menu"]'))
-      .click()
+    await applicationMenu.click()
     await page.getByRole('menuitem', { exact: true, name: 'Settings' }).click()
     return page.getByRole('dialog', { exact: true, name: 'Settings' })
   }
@@ -196,7 +194,7 @@ test('mounted sources remain immutable through content matching, settings, brows
   const registrationCookies = await page.context().cookies()
   expect(registrationCookies.find((cookie) => cookie.name === 'token')?.path).toBe(basePath || '/')
   await page.goto(deepLink)
-  await page.getByRole('button', { exact: true, name: 'Menu' }).click()
+  await applicationMenu.click()
   await page.getByRole('menuitem', { exact: true, name: /^log ?out$/iu }).click()
   await page
     .getByRole('alertdialog')
@@ -215,7 +213,7 @@ test('mounted sources remain immutable through content matching, settings, brows
   const loginResult = await loginResponse
   expect(loginResult.status()).toBe(200)
   await expect(page).toHaveURL(new URL(deepLink, deployment).href)
-  await expect(page.getByRole('button', { exact: true, name: 'Menu' })).toBeVisible()
+  await expect(applicationMenu).toBeVisible()
   const initialModules = new Set(
     resources.filter((resource) => new URL(resource.url).pathname.endsWith('.js')).map((resource) => resource.url),
   )
