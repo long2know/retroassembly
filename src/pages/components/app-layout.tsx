@@ -23,7 +23,9 @@ if (isBrowser()) {
 
 export function AppLayout({ children }: Readonly<{ children: ReactNode }>) {
   const error = useRouteError()
-  const { basePath = getBasePath(), currentUser, isHome, language, preference } = useLoaderData<typeof loader>() || {}
+  const { basePath, currentUser, isHome, language, preference } = useLoaderData<typeof loader>() || {
+    basePath: getBasePath(),
+  }
   const hydrateAtom = [preferenceAtom, preference] as const
   const hydrateAtoms = [hydrateAtom]
 

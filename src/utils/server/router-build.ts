@@ -16,7 +16,7 @@ export function configureRouterBuild(build: ServerBuild, basePath = getBasePath(
     }
     return withBasePath(value, basePath)
   }
-  const assets = build.assets
+  const { assets } = build
   const routes: ServerBuild['assets']['routes'] = {}
   for (const [id, route] of Object.entries(assets.routes)) {
     if (!route) {

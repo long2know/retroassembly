@@ -29,7 +29,10 @@ function runtimeLoader({ request }: { request: Request }) {
 }
 
 function createBuild(loader: LoaderFunction = runtimeLoader): ServerBuild {
+  // React Router 8.4 still emits and requires this legacy build metadata.
+  const legacyBuildMetadata = { isSpaMode: false }
   return {
+    ...legacyBuildMetadata,
     assets: {
       entry: { imports: ['./assets/shared.js'], module: './assets/entry.js' },
       routes: {
@@ -57,7 +60,7 @@ function createBuild(loader: LoaderFunction = runtimeLoader): ServerBuild {
     basename: '/',
     entry: {
       module: {
-        default(_request, status, headers, context) {
+        default(...[, status, headers, context]: Parameters<ServerBuild['entry']['module']['default']>) {
           return Response.json(
             {
               assets: context.manifest,
@@ -70,7 +73,6 @@ function createBuild(loader: LoaderFunction = runtimeLoader): ServerBuild {
       },
     },
     future: {},
-    isSpaMode: false,
     prerender: [],
     publicPath: './',
     routeDiscovery: { manifestPath: '/__manifest', mode: 'lazy' },
@@ -132,20 +134,26 @@ await describe('runtime server base-path contract', async () => {
       const document = await app.request(path)
       assert.equal(document.status, 200)
       const body = await document.json()
-      assert.equal(body.basename, basePath)
-      assert.deepEqual(body.data.root, { appPath: '/demo/platform/nes/rom/Homebrew Pulse', pathname: path })
-      assert.equal(body.assets.entry.module, withBasePath('/assets/entry.js', basePath))
-      assert.deepEqual(body.assets.routes.root.css, [withBasePath('/assets/styles.css', basePath)])
+      assert.partialDeepStrictEqual(body, {
+        assets: {
+          entry: { module: withBasePath('/assets/entry.js', basePath) },
+          routes: { root: { css: [withBasePath('/assets/styles.css', basePath)] } },
+        },
+        basename: basePath,
+        data: { root: { appPath: '/demo/platform/nes/rom/Homebrew Pulse', pathname: path } },
+      })
       assert.equal(configureRouterBuild(build).assets.entry.module, build.assets.entry.module)
       assert.equal(sourceBuild.assets.entry.module, './assets/entry.js', 'Do not mutate a shared server build')
       const data = await app.request(`${path}.data`)
       assert.equal(data.status, 200)
-      assert.ok((await data.text()).includes(path), 'Single-fetch loaders must see the configured public path')
+      const dataBody = await data.text()
+      assert.ok(dataBody.includes(path), 'Single-fetch loaders must see the configured public path')
       const manifest = await app.request(
         `${withBasePath('/__manifest', basePath)}?version=fixture&paths=${encodeURIComponent(path)}`,
       )
       assert.equal(manifest.status, 200)
-      assert.equal((await manifest.json()).root.module, withBasePath('/assets/root.js', basePath))
+      const routeManifest = await manifest.json()
+      assert.partialDeepStrictEqual(routeManifest, { root: { module: withBasePath('/assets/root.js', basePath) } })
       const file = await app.request(withBasePath('/api/v1/files/Homebrew%20Pulse.nes', basePath))
       assert.equal(await file.text(), 'Homebrew Pulse.nes')
 
@@ -162,20 +170,26 @@ await describe('runtime server base-path contract', async () => {
         `${withBasePath('/redirect', basePath)}?redirect_to=${encodeURIComponent(returnPath)}`,
       )
       assert.equal(returned.status, 302)
-      assert.equal(returned.headers.get('Location'), returnPath, 'Loader redirects must prepend the basename exactly once')
+      assert.equal(
+        returned.headers.get('Location'),
+        returnPath,
+        'Loader redirects must prepend the basename exactly once',
+      )
       const session = await app.request(withBasePath('/session', basePath), {
         headers: { 'X-Forwarded-Host': 'arcade.example', 'X-Forwarded-Proto': 'https' },
       })
       assert.ok(session.headers.get('Set-Cookie')?.includes(`Path=${basePath};`))
-      assert.equal(
-        (await session.json()).callback,
-        `https://arcade.example${withBasePath('/login/oidc/callback', basePath)}`,
-      )
+      const sessionBody = await session.json()
+      assert.partialDeepStrictEqual(sessionBody, {
+        callback: `https://arcade.example${withBasePath('/login/oidc/callback', basePath)}`,
+      })
       const webmanifest = await app.request(withBasePath('/manifest.webmanifest', basePath))
       const installation = await webmanifest.json()
-      assert.equal(installation.id, withBasePath('/?pwa_version=1', basePath))
-      assert.equal(installation.scope, withBasePath('/', basePath))
-      assert.equal(installation.start_url, withBasePath('/library', basePath))
+      assert.partialDeepStrictEqual(installation, {
+        id: withBasePath('/?pwa_version=1', basePath),
+        scope: withBasePath('/', basePath),
+        start_url: withBasePath('/library', basePath),
+      })
 
       if (basePath !== '/') {
         const canonical = await app.request(`${basePath}?sort=name`, { method: 'POST' })

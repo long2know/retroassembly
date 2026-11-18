@@ -190,13 +190,18 @@ test('mounted sources remain immutable through content matching, settings, brows
   })
   expect(registration.status(), await registration.text()).toBe(200)
   const account: { user: { id: string } } = await registration.json()
-  expect((await page.context().cookies()).find((cookie) => cookie.name === 'token')?.path).toBe(basePath || '/')
+  const registrationCookies = await page.context().cookies()
+  expect(registrationCookies.find((cookie) => cookie.name === 'token')?.path).toBe(basePath || '/')
   await page.goto(deepLink)
   await page.getByRole('button', { exact: true, name: 'Menu' }).click()
   await page.getByRole('menuitem', { exact: true, name: /^log ?out$/iu }).click()
-  await page.getByRole('alertdialog').getByRole('button', { exact: true, name: /^log ?out$/iu }).click()
+  await page
+    .getByRole('alertdialog')
+    .getByRole('button', { exact: true, name: /^log ?out$/iu })
+    .click()
   await expect(page).toHaveURL(new URL(appPath('/login'), deployment).href)
-  expect((await page.context().cookies()).some((cookie) => cookie.name === 'token')).toBe(false)
+  const logoutCookies = await page.context().cookies()
+  expect(logoutCookies.some((cookie) => cookie.name === 'token')).toBe(false)
   await page.goto(deepLink)
   await page.getByLabel('Username', { exact: true }).fill(credentials.username)
   await page.getByLabel('Password', { exact: true }).fill(credentials.password)
@@ -204,7 +209,8 @@ test('mounted sources remain immutable through content matching, settings, brows
     return new URL(response.url()).pathname === appPath('/api/v1/auth/login') && response.request().method() === 'POST'
   })
   await page.getByRole('button', { exact: true, name: /^log ?in$/iu }).click()
-  expect((await loginResponse).status()).toBe(200)
+  const loginResult = await loginResponse
+  expect(loginResult.status()).toBe(200)
   await expect(page).toHaveURL(new URL(deepLink, deployment).href)
   await expect(page.getByRole('button', { exact: true, name: 'Menu' })).toBeVisible()
   const initialModules = new Set(
@@ -360,7 +366,8 @@ test('mounted sources remain immutable through content matching, settings, brows
     return new URL(response.url()).pathname.endsWith('.data') && response.request().method() === 'GET'
   })
   await page.getByText(override, { exact: true }).first().click()
-  expect((await routeData).status()).toBe(200)
+  const routeDataResponse = await routeData
+  expect(routeDataResponse.status()).toBe(200)
   const romPageUrl = page.url()
   expect(new URL(romPageUrl).pathname.startsWith(appPath('/library/platform/nes/rom/'))).toBe(true)
   const reloaded = await page.reload()
@@ -487,8 +494,7 @@ test('mounted sources remain immutable through content matching, settings, brows
   await expect(automatic).toBeChecked()
   const automaticResponse = page.waitForResponse(function automaticSaved(response) {
     return (
-      new URL(response.url()).pathname === appPath('/api/v1/mounted-library') &&
-      response.request().method() === 'PATCH'
+      new URL(response.url()).pathname === appPath('/api/v1/mounted-library') && response.request().method() === 'PATCH'
     )
   })
   await automatic.click()
@@ -568,8 +574,7 @@ test('mounted sources remain immutable through content matching, settings, brows
   const beforeExplicitScanMatches = providerMatches(provider)
   const scanResponse = page.waitForResponse(function scanned(response) {
     return (
-      new URL(response.url()).pathname === appPath('/api/v1/mounted-library') &&
-      response.request().method() === 'POST'
+      new URL(response.url()).pathname === appPath('/api/v1/mounted-library') && response.request().method() === 'POST'
     )
   })
   await settings.getByRole('button', { exact: true, name: 'Scan ROM folders' }).click()

@@ -43,7 +43,7 @@ a live `.env`; credentials and personal configuration must never be committed.
 | ---------------------------------------------------- | ----------------------------------------------------- |
 | `DOCKER_DATA`                                        | Required; your application-data parent                |
 | `RETROASSEMBLY_IMAGE`                                | `ghcr.io/long2know/retroassembly:latest`              |
-| `BASE_URL`                                          | `/`; optional runtime application path prefix        |
+| `BASE_URL`                                           | `/`; optional runtime application path prefix         |
 | `PUID`, `PGID`                                       | `1000`, `1000`                                        |
 | `RETROASSEMBLY_HTTP_PORT`                            | `8910`                                                |
 | `RETROASSEMBLY_ROM_SOURCE`                           | `/mnt/emu/Emulation/roms`                             |

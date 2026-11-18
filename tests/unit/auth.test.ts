@@ -16,29 +16,23 @@ await describe('authentication helpers', async () => {
     assert.equal(getSafeRedirectTo(undefined), '/library')
   })
 
-  await it(
-    'rejects scheme-relative router redirects exposed by stripping the public prefix',
-    function rejectsStrippedRedirects() {
-      for (const basePath of ['/games/retroassembly', '/assets', '/api', '/login']) {
-        const redirectTo = `${basePath}//outside.example?next=%2Flibrary#games`
-        assert.equal(getSafeRedirectTo(redirectTo, basePath), redirectTo)
-        assert.equal(getSafeRouterRedirectTo(redirectTo, basePath), '/library')
-        assert.equal(getSafeRouterRedirectTo(`${basePath}/return/..//outside.example`, basePath), '/library')
-      }
-    },
-  )
+  await it('rejects scheme-relative router redirects exposed by stripping the public prefix', function rejectsStrippedRedirects() {
+    for (const basePath of ['/games/retroassembly', '/assets', '/api', '/login']) {
+      const redirectTo = `${basePath}//outside.example?next=%2Flibrary#games`
+      assert.equal(getSafeRedirectTo(redirectTo, basePath), redirectTo)
+      assert.equal(getSafeRouterRedirectTo(redirectTo, basePath), '/library')
+      assert.equal(getSafeRouterRedirectTo(`${basePath}/return/..//outside.example`, basePath), '/library')
+    }
+  })
 
-  await it(
-    'preserves encoded internal router returns without repeating the public prefix',
-    function preservesRouterReturns() {
-      const routerPath = '/library/rom/Homebrew%20Pulse%2F1?sort=name%26region#saves%20latest'
-      for (const basePath of ['/', '/games/retroassembly', '/assets', '/login']) {
-        const publicPath = `${basePath === '/' ? '' : basePath}${routerPath}`
-        assert.equal(getSafeRedirectTo(publicPath, basePath), publicPath)
-        assert.equal(getSafeRouterRedirectTo(publicPath, basePath), routerPath)
-      }
-    },
-  )
+  await it('preserves encoded internal router returns without repeating the public prefix', function preservesRouterReturns() {
+    const routerPath = '/library/rom/Homebrew%20Pulse%2F1?sort=name%26region#saves%20latest'
+    for (const basePath of ['/', '/games/retroassembly', '/assets', '/login']) {
+      const publicPath = `${basePath === '/' ? '' : basePath}${routerPath}`
+      assert.equal(getSafeRedirectTo(publicPath, basePath), publicPath)
+      assert.equal(getSafeRouterRedirectTo(publicPath, basePath), routerPath)
+    }
+  })
 
   await it('retries failed discovery and caches successful discovery across callers', async (t) => {
     const issuer = 'https://id.example'
