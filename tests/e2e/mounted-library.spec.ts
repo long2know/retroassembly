@@ -363,14 +363,18 @@ test('mounted sources remain immutable through content matching, settings, brows
   expect(updatedRom.gameName).toBe(override)
 
   await page.goto(appPath('/library/roms'))
+  const romPagePath = appPath('/library/platform/nes/rom/')
   const routeData = page.waitForResponse(function navigated(response) {
-    return new URL(response.url()).pathname.endsWith('.data') && response.request().method() === 'GET'
+    const { pathname } = new URL(response.url())
+    return pathname.startsWith(romPagePath) && pathname.endsWith('.data') && response.request().method() === 'GET'
   })
   await page.getByText(override, { exact: true }).first().click()
   const routeDataResponse = await routeData
   expect(routeDataResponse.status()).toBe(200)
+  await expect(page).toHaveURL(function onRomPage(url) {
+    return url.pathname.startsWith(romPagePath)
+  })
   const romPageUrl = page.url()
-  expect(new URL(romPageUrl).pathname.startsWith(appPath('/library/platform/nes/rom/'))).toBe(true)
   const reloaded = await page.reload()
   expect(reloaded?.status()).toBe(200)
   await expect(page).toHaveURL(romPageUrl)
