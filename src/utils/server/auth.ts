@@ -47,5 +47,6 @@ export function getSafeRedirectTo(value: null | string | undefined, basePath = g
 
 export function getSafeRouterRedirectTo(value: null | string | undefined, basePath = getBasePath()) {
   // React Router prepends its basename to root-relative loader redirects.
-  return stripBasePath(getSafeRedirectTo(value, basePath), basePath) ?? defaultRedirectTo
+  const routerPath = stripBasePath(getSafeRedirectTo(value, basePath), basePath)
+  return routerPath?.startsWith('/') && !routerPath.startsWith('//') ? routerPath : defaultRedirectTo
 }

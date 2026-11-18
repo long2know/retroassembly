@@ -2,9 +2,13 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { Hono } from 'hono'
 import { contextStorage, getContext } from 'hono/context-storage'
-import { RouterContextProvider, createRequestHandler, type ServerBuild } from 'react-router'
+import { RouterContextProvider, createRequestHandler, type LoaderFunction, type ServerBuild } from 'react-router'
+import { libraryModeEnum } from '#@/databases/schema.ts'
 import { auth } from '#@/middlewares/auth.ts'
 import { baseUrl } from '#@/middlewares/base-url.ts'
+import { loader as loginOidcLoader } from '#@/pages/routes/login-oidc.ts'
+import { loader as loginLoader } from '#@/pages/routes/login.tsx'
+import { loader as logoutLoader } from '#@/pages/routes/logout.ts'
 import { withBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { getSafeRedirectTo, getSafeRouterRedirectTo } from '#@/utils/server/auth.ts'
 import { getOidcCallbackUrl } from '#@/utils/server/oidc.ts'
@@ -16,7 +20,15 @@ function Page() {
   return null
 }
 
-function createBuild(): ServerBuild {
+function runtimeLoader({ request }: { request: Request }) {
+  const url = new URL(request.url)
+  if (url.pathname.endsWith('/redirect')) {
+    return getContext().redirect(getSafeRouterRedirectTo(url.searchParams.get('redirect_to')))
+  }
+  return { appPath: getContext().var.appPath, pathname: url.pathname }
+}
+
+function createBuild(loader: LoaderFunction = runtimeLoader): ServerBuild {
   return {
     assets: {
       entry: { imports: ['./assets/shared.js'], module: './assets/entry.js' },
@@ -67,19 +79,29 @@ function createBuild(): ServerBuild {
         id: 'root',
         module: {
           default: Page,
-          loader({ request }) {
-            const url = new URL(request.url)
-            if (url.pathname.endsWith('/redirect')) {
-              return getContext().redirect(getSafeRouterRedirectTo(url.searchParams.get('redirect_to')))
-            }
-            return { appPath: getContext().var.appPath, pathname: url.pathname }
-          },
+          loader,
         },
         path: '*',
       },
     },
     ssr: true,
   }
+}
+
+function createAuthenticatedApp(loader: LoaderFunction) {
+  const handler = createRequestHandler(configureRouterBuild(createBuild(loader)), 'test')
+  const app = new Hono()
+  app.use(contextStorage())
+  app.use(baseUrl())
+  app.use(async function authenticated(c, next) {
+    c.set('currentUser', { id: 'fixture-user', libraryMode: libraryModeEnum.isolated, username: 'fixture' })
+    await next()
+  })
+  app.use(auth())
+  app.all('*', function handleLoader(c) {
+    return handler(c.req.raw, new RouterContextProvider())
+  })
+  return app
 }
 
 await describe('runtime server base-path contract', async () => {
@@ -111,7 +133,7 @@ await describe('runtime server base-path contract', async () => {
       assert.equal(document.status, 200)
       const body = await document.json()
       assert.equal(body.basename, basePath)
-      assert.deepEqual(body.data.root, { appPath: '/demo/platform/nes/rom/Homebrew%20Pulse', pathname: path })
+      assert.deepEqual(body.data.root, { appPath: '/demo/platform/nes/rom/Homebrew Pulse', pathname: path })
       assert.equal(body.assets.entry.module, withBasePath('/assets/entry.js', basePath))
       assert.deepEqual(body.assets.routes.root.css, [withBasePath('/assets/styles.css', basePath)])
       assert.equal(configureRouterBuild(build).assets.entry.module, build.assets.entry.module)
@@ -166,6 +188,49 @@ await describe('runtime server base-path contract', async () => {
         assert.equal(getSafeRedirectTo(`${basePath}/../library`), `${basePath}/library`)
         assert.equal(getSafeRedirectTo(`${basePath}2/library`), `${basePath}/library`)
       }
+    })
+  }
+
+  for (const basePath of ['/', '/games/retroassembly', '/assets']) {
+    await it(`contains real login loader redirects at ${basePath}`, async function containsLoginRedirects(t) {
+      t.mock.property(process, 'env', {
+        ...process.env,
+        BASE_URL: basePath,
+        RETROASSEMBLY_RUN_TIME_OIDC_CLIENT_ID: 'fixture',
+        RETROASSEMBLY_RUN_TIME_OIDC_CLIENT_SECRET: 'fixture',
+        RETROASSEMBLY_RUN_TIME_OIDC_ISSUER: 'https://id.example',
+        RETROASSEMBLY_RUN_TIME_SUPABASE_ANON_KEY: '',
+        RETROASSEMBLY_RUN_TIME_SUPABASE_URL: '',
+      })
+      const prefix = basePath === '/' ? '' : basePath
+      const validReturn = `${prefix}/library/rom/Homebrew%20Pulse%2F1?sort=name%26region#saves%20latest`
+      const returns = [
+        { expected: `${prefix}/library`, value: `${prefix}//outside.example` },
+        { expected: `${prefix}/library`, value: `${prefix}/return/..//outside.example?next=%2Flibrary#games` },
+        { expected: validReturn, value: validReturn },
+      ]
+      for (const route of [
+        { loader: loginLoader, path: '/login' },
+        { loader: loginOidcLoader, path: '/login/oidc' },
+      ]) {
+        const app = createAuthenticatedApp(route.loader)
+        for (const { expected, value } of returns) {
+          const response = await app.request(`${prefix}${route.path}?redirect_to=${encodeURIComponent(value)}`)
+          assert.equal(response.status, 302)
+          const location = response.headers.get('Location')
+          assert.ok(location)
+          assert.equal(location, expected, `${route.path}: ${value}`)
+          const target = new URL(location, 'http://localhost')
+          assert.equal(target.origin, 'http://localhost')
+          assert.ok(target.pathname.startsWith(`${prefix}/`))
+        }
+      }
+
+      const logout = await createAuthenticatedApp(logoutLoader).request(
+        `${prefix}/logout?redirect_to=${encodeURIComponent(`${prefix}//outside.example`)}`,
+      )
+      assert.equal(logout.status, 302)
+      assert.equal(logout.headers.get('Location'), basePath)
     })
   }
 })
