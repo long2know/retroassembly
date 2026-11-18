@@ -88,7 +88,9 @@ test('mounted sources remain immutable through content matching, settings, brows
   const resources: { contentType: string; status: number; url: string }[] = []
   page.context().on('request', function checkPrefix(request) {
     const url = new URL(request.url())
-    if (url.origin === deployment.origin && basePath && !url.pathname.startsWith(`${basePath}/`)) {
+    const networkRequest = url.protocol === 'http:' || url.protocol === 'https:'
+    const deploymentPath = url.pathname === basePath || url.pathname.startsWith(`${basePath}/`)
+    if (networkRequest && url.origin === deployment.origin && basePath && !deploymentPath) {
       forbiddenRootRequests.push(url.href)
     }
   })
