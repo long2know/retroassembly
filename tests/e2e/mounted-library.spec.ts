@@ -136,7 +136,10 @@ test('mounted sources remain immutable through content matching, settings, brows
   }
 
   async function openSettings() {
-    await page.getByRole('button', { exact: true, name: 'Menu' }).click()
+    await page
+      .getByRole('button', { exact: true, name: 'Menu' })
+      .and(page.locator('[aria-haspopup="menu"]'))
+      .click()
     await page.getByRole('menuitem', { exact: true, name: 'Settings' }).click()
     return page.getByRole('dialog', { exact: true, name: 'Settings' })
   }
