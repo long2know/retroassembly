@@ -2,6 +2,7 @@ import assert from 'node:assert'
 import { getRuntimeKey } from 'hono/adapter'
 import { defaultRedirectTo, type AuthMode } from '#@/constants/auth.ts'
 import { getRunTimeEnv } from '#@/constants/env.ts'
+import { getBasePath, stripBasePath, withBasePath } from '#@/utils/isomorphic/base-url.ts'
 
 export function getAuthMode(): AuthMode {
   return resolveAuthMode(getRunTimeEnv(), getRuntimeKey())
@@ -31,14 +32,20 @@ export function resolveAuthMode(env: Record<string, unknown>, runtimeKey: string
   return 'local'
 }
 
-export function getSafeRedirectTo(value: null | string | undefined) {
+export function getSafeRedirectTo(value: null | string | undefined, basePath = getBasePath()) {
+  const fallback = withBasePath(defaultRedirectTo, basePath)
   if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) {
-    return defaultRedirectTo
+    return fallback
   }
   const baseUrl = new URL('https://retroassembly.invalid')
   const redirectUrl = new URL(value, baseUrl)
-  if (redirectUrl.origin !== baseUrl.origin || redirectUrl.pathname.startsWith('//')) {
-    return defaultRedirectTo
+  if (redirectUrl.origin !== baseUrl.origin || stripBasePath(redirectUrl.pathname, basePath) === undefined) {
+    return fallback
   }
   return `${redirectUrl.pathname}${redirectUrl.search}${redirectUrl.hash}`
+}
+
+export function getSafeRouterRedirectTo(value: null | string | undefined, basePath = getBasePath()) {
+  // React Router prepends its basename to root-relative loader redirects.
+  return stripBasePath(getSafeRedirectTo(value, basePath), basePath) ?? defaultRedirectTo
 }

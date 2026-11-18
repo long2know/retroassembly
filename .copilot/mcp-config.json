@@ -2,10 +2,7 @@
   "mcpServers": {
     "EXAMPLE-github": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@anthropic/github-mcp-server"
-      ],
+      "args": ["-y", "@anthropic/github-mcp-server"],
       "env": {
         "GITHUB_TOKEN": "${GITHUB_TOKEN}"
       }

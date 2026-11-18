@@ -8,6 +8,8 @@ import { Uint8ArrayReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js'
 
 const project = process.cwd()
 const image = process.env.RETROASSEMBLY_MOUNTED_TEST_IMAGE || 'ghcr.io/long2know/retroassembly:latest'
+const configuredBaseUrl = process.env.RETROASSEMBLY_MOUNTED_TEST_BASE_URL || ''
+const basePath = configuredBaseUrl === '/' ? '' : configuredBaseUrl.replace(/\/$/u, '')
 const label = 'org.retro-web.project=5c9839ba'
 const suffix = randomUUID().slice(0, 8)
 const container = `retro-web-5c9839ba-app-${suffix}`
@@ -25,7 +27,7 @@ const reportFile = path.resolve(
   process.env.RETROASSEMBLY_MOUNTED_TEST_REPORT || 'node_modules/.cache/mounted-library-acceptance.json',
 )
 const browserReportFile = path.join(fixtures, 'browser.json')
-const report: Record<string, unknown> = { container, image, node: process.version, volume }
+const report: Record<string, unknown> = { basePath: basePath || '/', container, image, node: process.version, volume }
 let volumeCreated = false
 let networkCreated = false
 
@@ -275,6 +277,7 @@ try {
     'PUID=1000',
     '--env',
     'PGID=1000',
+    ...(configuredBaseUrl ? ['--env', `BASE_URL=${configuredBaseUrl}`] : []),
     '--env',
     'RETROASSEMBLY_RUN_TIME_DATA_DIRECTORY=/app/data',
     '--env',
@@ -313,7 +316,7 @@ try {
   assert.equal(binding.HostIp, '127.0.0.1')
   assert.notEqual(binding.HostPort, '8910')
   assert.notEqual(binding.HostPort, '8000')
-  const url = `http://127.0.0.1:${binding.HostPort}`
+  const url = `http://127.0.0.1:${binding.HostPort}${basePath}`
   report.url = url
   await waitReady(`${url}/login`)
   report.writeAttemptsBeforePlay = attemptSourceWrites()

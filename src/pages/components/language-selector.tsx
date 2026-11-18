@@ -3,17 +3,18 @@ import Cookies from 'js-cookie'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { locales } from '#@/locales/locales.ts'
+import { getBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { getHomePath } from '#@/utils/isomorphic/misc.ts'
 import { useGlobalLoaderData } from '../hooks/use-global-loader-data.ts'
 
 const key = 'home-language'
 
 function handleClickAuto() {
-  Cookies.remove(key)
+  Cookies.remove(key, { path: getBasePath() })
 }
 
 function handleClickLanguage(localeCode) {
-  Cookies.set(key, localeCode)
+  Cookies.set(key, localeCode, { path: getBasePath() })
 }
 
 export function LanguageSelector() {

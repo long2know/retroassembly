@@ -43,6 +43,7 @@ a live `.env`; credentials and personal configuration must never be committed.
 | ---------------------------------------------------- | ----------------------------------------------------- |
 | `DOCKER_DATA`                                        | Required; your application-data parent                |
 | `RETROASSEMBLY_IMAGE`                                | `ghcr.io/long2know/retroassembly:latest`              |
+| `BASE_URL`                                          | `/`; optional runtime application path prefix        |
 | `PUID`, `PGID`                                       | `1000`, `1000`                                        |
 | `RETROASSEMBLY_HTTP_PORT`                            | `8910`                                                |
 | `RETROASSEMBLY_ROM_SOURCE`                           | `/mnt/emu/Emulation/roms`                             |
@@ -60,6 +61,62 @@ Keep the internal directory overrides aligned with their mounts. Writable data/s
 must not overlap the immutable source directories; invalid configurations fail closed.
 Enrichment is best-effort and requires provider connectivity. Browser emulator cores are
 downloaded from upstream's pinned CDN URLs; this image is not a fully offline emulator bundle.
+
+### Hosting under a path prefix
+
+Set `BASE_URL` in the container environment; the **same published image** works at `/`,
+`/retroassembly`, or a nested path such as `/games/retroassembly`. No rebuild, build argument,
+app-data migration or collection changes are needed. Unset, empty and `/` all retain root
+hosting. One trailing slash is normalized away; the bare prefix redirects to its slash form.
+Prefixes consist of URL-safe ASCII segments (letters, digits, `_`, `-`, `.`, `~`), not an
+origin or URL. Empty segments, `.`/`..`, percent escapes, spaces, queries and fragments are
+rejected at startup rather than silently falling back to root.
+
+For example, the sample Compose already passes `${BASE_URL:-/}` through:
+
+```sh
+export BASE_URL=/retroassembly
+export RETROASSEMBLY_ROM_SOURCE=/media/emu/Emulation/roms
+export RETROASSEMBLY_BIOS_SOURCE=/media/emu/Emulation/bios
+docker compose --env-file /dev/null -f compose.yaml up -d --no-build
+# Open https://arcade.example/retroassembly/
+```
+
+Or put `BASE_URL: /retroassembly` directly under the service's `environment`. Keep the
+existing UID/GID, port `8910`, read-only source mounts and writable
+`${DOCKER_DATA}/retroassembly/data:/app/data`. Restart/recreate the container when changing
+the prefix; close old tabs and sign in at the new URL.
+
+The reverse proxy must **preserve the prefix**, including API, file, asset, `.data` and
+`__manifest` requests. Do not strip it or use forwarded-prefix headers as configuration.
+Example nginx locations for a loopback-published port:
+
+```nginx
+location = /retroassembly {
+    return 308 /retroassembly/$is_args$args;
+}
+location /retroassembly/ {
+    proxy_pass http://127.0.0.1:8910;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+There is deliberately **no trailing slash on `proxy_pass`**: nginx must forward
+`/retroassembly/library` unchanged. Restrict direct access to the application when trusting
+proxy-supplied host/protocol headers. Requests outside the configured prefix return `404`;
+configure other locations independently. Use the same rule with the full nested prefix.
+Health/readiness probes must use `<prefix>/login` rather than `/login`.
+
+Local accounts keep their existing data. For OIDC, register
+`https://arcade.example/retroassembly/login/oidc/callback` with the provider; if
+`RETROASSEMBLY_RUN_TIME_OIDC_REDIRECT_URI` is explicitly set, update it to that same public
+callback. Supabase OAuth returns to `https://arcade.example/retroassembly/login`; allow that
+redirect URL in Supabase (the provider's Supabase callback itself is unchanged). Session and
+OAuth-flow cookies are scoped to the application path. External provider/CDN URLs remain
+external. This runtime deployment option targets the Node/Docker image; Workers retain
+their root-hosted configuration.
 
 ## ROM indexing and metadata controls
 
@@ -144,13 +201,14 @@ lint and types with zero warnings. It builds the production Dockerfile for `linu
 including the original MIT license and readable/traversable files for UID 1000.
 The Dockerfile also uses frozen installs.
 
-The built image must pass real mounted-library Docker/browser acceptance, and the gate must
+The same built image must pass real mounted-library Docker/browser acceptance both at root
+and at `/games/retroassembly`, and the gate must
 reject an intentionally writable synthetic ROM bind. Only trusted `main` push/manual runs
 can pass that exact accepted image through a checksum-verified Actions artifact to a
 `packages: write` publication job. PR code never receives package-write permission.
 The SHA-tagged candidate is then pulled by digest onto a fresh runner using
 `packages: read`, its image ID and source/revision/MIT OCI labels are checked, and the same
-browser/read-only/persistence test runs again. Only then is the unchanged manifest promoted
+root/subpath browser/read-only/persistence test runs again. Only then is the unchanged manifest promoted
 to `latest`. Promotion refuses stale source revisions; commit tags must not be overwritten.
 
 GHCR authentication uses Actions' short-lived `GITHUB_TOKEN` only. No PAT, DockerHub secret,
@@ -273,7 +331,20 @@ pnpm exec playwright install --with-deps chromium
 RETROASSEMBLY_MOUNTED_TEST_BROWSER=chromium \
 RETROASSEMBLY_MOUNTED_TEST_IMAGE=ghcr.io/long2know/retroassembly@sha256:REPLACE_WITH_VERIFIED_DIGEST \
 node tests/e2e/mounted-library-docker.ts
+# Repeat against that exact image/digest, with separate synthetic data:
+RETROASSEMBLY_MOUNTED_TEST_BASE_URL=/games/retroassembly \
+RETROASSEMBLY_MOUNTED_TEST_BROWSER=chromium \
+RETROASSEMBLY_MOUNTED_TEST_IMAGE=ghcr.io/long2know/retroassembly@sha256:REPLACE_WITH_VERIFIED_DIGEST \
+RETROASSEMBLY_MOUNTED_TEST_REPORT=node_modules/.cache/ci/subpath-image.json \
+node tests/e2e/mounted-library-docker.ts
 ```
+
+Both runs retain all read-only, real emulator-frame, save/resume and two-restart assertions.
+The browser gate also checks login/logout, deep-route reload/hydration, CSS/JS and lazy
+imports, route discovery, app-owned files/artwork and forbidden same-origin root requests.
+Acceptance JSON records resource URLs and the settings screenshot's public URL; the
+prefixed screenshot is `mounted-metadata-settings-subpath.png` alongside the existing root
+screenshot in the workflow artifacts.
 
 This focused extension of the existing Playwright suite creates its own original NES
 homebrew, synthetic BIOS/palette bytes, and a controlled metadata HTTP fixture. It uses uniquely named containers and a fresh

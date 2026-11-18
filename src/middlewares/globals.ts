@@ -40,7 +40,7 @@ function getDetectedLanguage(c: Context) {
 function getLanguage(c: Context) {
   const { detectedLanguage, preference } = c.var
 
-  const path = c.req.path.endsWith('.data') ? c.req.path.slice(0, -5) : c.req.path
+  const path = c.var.appPath.endsWith('.data') ? c.var.appPath.slice(0, -5) : c.var.appPath
   const segments = path.split('/').slice(1)
   const [segment] = segments
   const isDemo = match('/demo{/*path}')(path)

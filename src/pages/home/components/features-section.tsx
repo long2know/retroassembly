@@ -2,6 +2,7 @@ import { clsx } from 'clsx'
 import { range } from 'es-toolkit'
 import { useTranslation } from 'react-i18next'
 import { getPlatformDeviceBackground, getRomLibretroThumbnail } from '#@/utils/client/library.ts'
+import { withBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { DemoFocusIndicator } from '../../components/demo-focus-indicator.tsx'
 import rewindImage from './rewind-image.png'
 
@@ -134,7 +135,7 @@ function useFeatures() {
           <div
             className='rewind-demo img-saturate size-full animate-[rewind-demo-background-move_30s_linear_infinite] bg-cover'
             style={{
-              backgroundImage: `url("${rewindImage}")`,
+              backgroundImage: `url("${withBasePath(rewindImage)}")`,
             }}
           />
           <div className='absolute top-0 left-0 flex size-full items-center justify-center'>

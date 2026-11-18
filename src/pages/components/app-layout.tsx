@@ -7,6 +7,7 @@ import { type ReactNode, useEffect } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { Scripts, ScrollRestoration, useLoaderData, useRouteError } from 'react-router'
 import type { loader } from '#@/pages/root.tsx'
+import { getBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { i18n } from '#@/utils/isomorphic/i18n.ts'
 import { getGlobalCSSVars } from '#@/utils/isomorphic/misc.ts'
 import { preferenceAtom } from '../atoms.ts'
@@ -22,7 +23,7 @@ if (isBrowser()) {
 
 export function AppLayout({ children }: Readonly<{ children: ReactNode }>) {
   const error = useRouteError()
-  const { currentUser, isHome, language, preference } = useLoaderData<typeof loader>() || {}
+  const { basePath = getBasePath(), currentUser, isHome, language, preference } = useLoaderData<typeof loader>() || {}
   const hydrateAtom = [preferenceAtom, preference] as const
   const hydrateAtoms = [hydrateAtom]
 
@@ -33,7 +34,7 @@ export function AppLayout({ children }: Readonly<{ children: ReactNode }>) {
   }, [language])
 
   return (
-    <html lang={language} prefix='og: https://ogp.me/ns#' suppressHydrationWarning>
+    <html data-base-url={basePath} lang={language} prefix='og: https://ogp.me/ns#' suppressHydrationWarning>
       <I18nextProvider i18n={i18n}>
         <Head />
       </I18nextProvider>

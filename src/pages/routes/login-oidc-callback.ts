@@ -6,7 +6,8 @@ import { authorizationCodeGrant } from 'openid-client'
 import { createSessionForUser } from '#@/controllers/sessions/create-session.ts'
 import { getOrCreateOidcUser } from '#@/controllers/users/get-or-create-oidc-user.ts'
 import { authenticationMethodEnum } from '#@/databases/schema.ts'
-import { getAuthMode, getSafeRedirectTo } from '#@/utils/server/auth.ts'
+import { withBasePath } from '#@/utils/isomorphic/base-url.ts'
+import { getAuthMode, getSafeRouterRedirectTo } from '#@/utils/server/auth.ts'
 import {
   getOidcCallbackUrl,
   getOidcConfiguration,
@@ -16,12 +17,10 @@ import {
 import { isSecureRequest, setSessionCookie } from '#@/utils/server/session.ts'
 import type { Route } from './+types/login-oidc-callback.ts'
 
-const flowCookiePath = '/login/oidc/callback'
-
 function clearFlowCookies() {
   const c = getContext()
   for (const name of ['oidc-code-verifier', 'oidc-nonce', 'oidc-redirect-to', 'oidc-state']) {
-    deleteCookie(c, name, { path: flowCookiePath })
+    deleteCookie(c, name, { path: withBasePath('/login/oidc/callback') })
   }
 }
 
@@ -34,7 +33,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const codeVerifier = getCookie(c, 'oidc-code-verifier')
   const nonce = getCookie(c, 'oidc-nonce')
   const state = getCookie(c, 'oidc-state')
-  const redirectTo = getSafeRedirectTo(getCookie(c, 'oidc-redirect-to'))
+  const redirectTo = getSafeRouterRedirectTo(getCookie(c, 'oidc-redirect-to'))
 
   if (!codeVerifier || !nonce || !state) {
     clearFlowCookies()

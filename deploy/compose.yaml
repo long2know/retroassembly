@@ -6,6 +6,7 @@ services:
     restart: unless-stopped
     user: '${PUID:-1000}:${PGID:-1000}'
     environment:
+      BASE_URL: '${BASE_URL:-/}'
       PUID: '${PUID:-1000}'
       PGID: '${PGID:-1000}'
       RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY: '${RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY:-true}'

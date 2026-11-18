@@ -1,6 +1,7 @@
 import { getContext } from 'hono/context-storage'
 import { deleteCookie } from 'hono/cookie'
 import { invalidateSession } from '#@/controllers/sessions/invalidate-session.ts'
+import { getBasePath } from '#@/utils/isomorphic/base-url.ts'
 
 export async function loader() {
   const c = getContext()
@@ -13,7 +14,7 @@ export async function loader() {
 
   if (token) {
     await invalidateSession()
-    deleteCookie(c, 'token')
+    deleteCookie(c, 'token', { path: getBasePath() })
   }
 
   return c.redirect('/')

@@ -35,6 +35,7 @@ import {
   userTable,
 } from '#@/databases/schema.ts'
 import { auth } from '#@/middlewares/auth.ts'
+import { baseUrl } from '#@/middlewares/base-url.ts'
 import { globals } from '#@/middlewares/globals.ts'
 import { getRomUrl } from '#@/pages/library/utils/rom.ts'
 import { routes } from '#@/pages/routes.ts'
@@ -83,6 +84,7 @@ const defaultFiles = { 'roms/NES/Nested/雪 & Hero.NES': 'original ROM' }
 function createFixtureApp(library: ReturnType<typeof createDrizzle>['library']) {
   const app = new Hono()
   app.use(contextStorage())
+  app.use(baseUrl())
   app.use(async (c, next) => {
     c.set('db', { library })
     c.set('storage', createStorage())

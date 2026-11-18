@@ -80,12 +80,16 @@ jobs:
           test "$(docker image inspect "$IMAGE@$DIGEST" --format '{{index .Config.Labels "org.opencontainers.image.source"}}')" = https://github.com/long2know/retroassembly
           test "$(docker image inspect "$IMAGE@$DIGEST" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$REVISION"
           test "$(docker image inspect "$IMAGE@$DIGEST" --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}')" = MIT
-      - name: Browser, read-only mounts and persistence against public image
+      - name: Same public image at root and subpath with browser, read-only and persistence acceptance
         env:
           RETROASSEMBLY_MOUNTED_TEST_IMAGE: ${{ env.IMAGE }}@${{ env.DIGEST }}
           RETROASSEMBLY_MOUNTED_TEST_BROWSER: chromium
           RETROASSEMBLY_MOUNTED_TEST_REPORT: node_modules/.cache/ci/public-image.json
-        run: node tests/e2e/mounted-library-docker.ts
+        run: |
+          node tests/e2e/mounted-library-docker.ts
+          RETROASSEMBLY_MOUNTED_TEST_BASE_URL=/games/retroassembly \
+          RETROASSEMBLY_MOUNTED_TEST_REPORT=node_modules/.cache/ci/public-image-subpath.json \
+          node tests/e2e/mounted-library-docker.ts
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

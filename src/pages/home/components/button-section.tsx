@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { withBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { ButtonLinks } from '../../components/button-links.tsx'
 import { Paralolas } from '../../components/parabolas.tsx'
 import background from './button-section-background.svg'
@@ -11,7 +12,7 @@ export function ButtonSection() {
       <div
         className='absolute inset-0 opacity-10'
         style={{
-          backgroundImage: `url("${background}"), url("${background}")`,
+          backgroundImage: `url("${withBasePath(background)}"), url("${withBasePath(background)}")`,
           backgroundPosition: 'top 0 left 0, top 48px left 48px',
           backgroundRepeat: 'repeat',
           backgroundSize: '192px 96px',

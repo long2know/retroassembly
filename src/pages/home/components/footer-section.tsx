@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { links } from '#@/constants/links.ts'
 import { metadata } from '#@/constants/metadata.ts'
 import { Logo } from '#@/pages/components/logo.tsx'
+import { withBasePath } from '#@/utils/isomorphic/base-url.ts'
 
 const year = new Date().getFullYear()
 
@@ -12,7 +13,7 @@ export function FooterSection() {
     <footer className='border border-x-0 border-b-0 border-t-(--gray-4) p-8 text-center text-sm font-light text-(--gray-11)'>
       <div className='pb-safe mx-auto flex w-7xl max-w-full flex-col items-center justify-between gap-4 sm:flex-row'>
         <div className='flex flex-col items-center gap-4 sm:items-start'>
-          <a className='flex items-center gap-2 font-serif font-bold text-(--accent-9)' href='/'>
+          <a className='flex items-center gap-2 font-serif font-bold text-(--accent-9)' href={withBasePath('/')}>
             <Logo height='32' width='32' />
             <span className='font-serif font-semibold'>{metadata.title}</span>
           </a>

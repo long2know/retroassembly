@@ -11,6 +11,7 @@ import devtoolsJson from 'vite-plugin-devtools-json'
 import { defineConfig, type Plugin, type UserConfig } from 'vite-plus'
 import { getTargetRuntime, logServerInfo, prepareWranglerConfig } from './scripts/utils.ts'
 import { getDirectories } from './src/constants/env.ts'
+import { withBasePath } from './src/utils/isomorphic/base-url.ts'
 import { getMountedConfiguration } from './src/utils/server/mounted-files.ts'
 
 defaults(process.env, {
@@ -65,6 +66,7 @@ export default defineConfig(async (env) => {
   const port = envPort ? Math.trunc(Number(envPort)) || 8000 : 8000
   const plugins = [tailwindcss({ optimize: false }), reactRouter(), [devtoolsJson()], serverInfo()]
   const config: UserConfig = {
+    base: env.command === 'build' ? './' : withBasePath('/'),
     build: { chunkSizeWarningLimit: 1024 },
     clearScreen: false,
     envPrefix: 'RETROASSEMBLY_BUILD_TIME_VITE_',

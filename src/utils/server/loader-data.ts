@@ -5,6 +5,7 @@ import { getRunTimeEnv, isMountedLibraryEnabled, isMountedLibraryOnly } from '#@
 import { metadata } from '#@/constants/metadata.ts'
 import { cookieConsentStatusKey } from '#@/constants/misc.ts'
 import { getLaunchRecords } from '#@/controllers/launch-records/get-launch-records.ts'
+import { getBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { getAuthMode } from '#@/utils/server/auth.ts'
 import { getMountedLibrary } from '#@/utils/server/mounted-library-runtime.ts'
 
@@ -32,6 +33,7 @@ export function getCommonLoaderData<T>(data: T = {} as T) {
 
   return {
     authMode: getAuthMode(),
+    basePath: getBasePath(),
     cookieConsentStatus,
     currentUser,
     detectedLanguage,

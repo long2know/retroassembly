@@ -1,4 +1,7 @@
 import { getContext } from 'hono/context-storage'
+import { withBasePath } from '#@/utils/isomorphic/base-url.ts'
+import { getSafeRedirectTo } from '#@/utils/server/auth.ts'
+import { getRequestUrl } from '#@/utils/server/request-url.ts'
 import type { Route } from './+types/login-google.ts'
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -9,9 +12,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw c.redirect('/')
   }
 
-  const oauthRedirectToURL = new URL('/login', new URL(c.req.url).origin)
+  const oauthRedirectToURL = new URL(withBasePath('/login'), getRequestUrl())
   const { searchParams } = new URL(request.url)
-  const redirectTo = searchParams.get('redirect_to')
+  const redirectTo = getSafeRedirectTo(searchParams.get('redirect_to'))
   if (redirectTo) {
     oauthRedirectToURL.searchParams.set('redirect_to', redirectTo)
   }
