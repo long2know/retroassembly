@@ -1,6 +1,7 @@
 import { attemptAsync } from 'es-toolkit'
 import { type Configuration, discovery } from 'openid-client'
 import { getRunTimeEnv } from '#@/constants/env.ts'
+import { withBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { getRequestUrl } from './request-url.ts'
 
 let configurationPromise: Promise<Configuration> | undefined
@@ -20,7 +21,7 @@ export function getOidcSettings() {
 }
 
 export function getOidcCallbackUrl() {
-  return getOidcSettings().redirectUri || new URL('/login/oidc/callback', getRequestUrl()).href
+  return getOidcSettings().redirectUri || new URL(withBasePath('/login/oidc/callback'), getRequestUrl()).href
 }
 
 export async function getOidcConfiguration() {

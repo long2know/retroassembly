@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cookieConsentStatusKey } from '#@/constants/misc.ts'
 import { initClarity } from '#@/utils/client/clarity.ts'
+import { getBasePath, withBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { useGlobalLoaderData } from '../hooks/use-global-loader-data.ts'
 
 export function CookieConsent() {
@@ -12,13 +13,13 @@ export function CookieConsent() {
   const [visible, setVisible] = useState(!cookieConsentStatus)
 
   function handleClickAccept() {
-    Cookies.set(cookieConsentStatusKey, '1', { expires: 3650 })
+    Cookies.set(cookieConsentStatusKey, '1', { expires: 3650, path: getBasePath() })
     initClarity()
     setVisible(false)
   }
 
   function handleClickDeny() {
-    Cookies.set(cookieConsentStatusKey, '0', { expires: 3650 })
+    Cookies.set(cookieConsentStatusKey, '0', { expires: 3650, path: getBasePath() })
     setVisible(false)
   }
 
@@ -45,7 +46,7 @@ export function CookieConsent() {
             {t('common.cookies')}
           </a>{' '}
           {t('home.cookiesAgreement')}{' '}
-          <a className='underline' href='/privacy-policy.md' rel='noopener noreferrer' target='_blank'>
+          <a className='underline' href={withBasePath('/privacy-policy.md')} rel='noopener noreferrer' target='_blank'>
             {t('common.privacyPolicy')}
           </a>
           .

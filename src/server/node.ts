@@ -3,9 +3,11 @@ import '../utils/server/migration/raw-metadata.ts'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { RouterContextProvider, createRequestHandler } from 'react-router'
+import { getBasePath, stripBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { getAuthMode } from '#@/utils/server/auth.ts'
 import { createDrizzle } from '#@/utils/server/drizzle.ts'
 import { initializeMountedLibrary } from '#@/utils/server/mounted-library.ts'
+import { configureRouterBuild } from '#@/utils/server/router-build.ts'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore we can not guarantee that this file exists
 import * as build from '../../dist/server/index.js'
@@ -15,7 +17,7 @@ getAuthMode()
 await initializeMountedLibrary(createDrizzle().library)
 
 const pages = new Hono()
-const requestHandler = createRequestHandler(build, 'production')
+const requestHandler = createRequestHandler(configureRouterBuild(build), 'production')
 pages.all('*', (c) => requestHandler(c.req.raw, new RouterContextProvider()))
 
 app.use(
@@ -24,10 +26,13 @@ app.use(
       c.header('Cache-Control', 'public, immutable, max-age=31536000')
     },
     precompressed: true,
+    rewriteRequestPath(path) {
+      return stripBasePath(path) ?? path
+    },
     root: 'dist/client',
   }),
 )
 
-app.route('', pages)
+app.route(getBasePath(), pages)
 
 export { default } from './app.ts'

@@ -2,6 +2,7 @@ import { type CookieOptions, createServerClient, parseCookieHeader } from '@supa
 import { getContext } from 'hono/context-storage'
 import { setCookie } from 'hono/cookie'
 import { getRunTimeEnv } from '#@/constants/env.ts'
+import { getBasePath } from '#@/utils/isomorphic/base-url.ts'
 
 declare module 'hono' {
   interface ContextVariableMap {
@@ -18,6 +19,7 @@ export function createSupabase() {
   const { RETROASSEMBLY_RUN_TIME_SUPABASE_ANON_KEY, RETROASSEMBLY_RUN_TIME_SUPABASE_URL } = getRunTimeEnv()
   if (RETROASSEMBLY_RUN_TIME_SUPABASE_ANON_KEY && RETROASSEMBLY_RUN_TIME_SUPABASE_URL) {
     return createServerClient(RETROASSEMBLY_RUN_TIME_SUPABASE_URL, RETROASSEMBLY_RUN_TIME_SUPABASE_ANON_KEY, {
+      cookieOptions: { path: getBasePath() },
       cookies: {
         getAll() {
           const cookieHeader = c.req.header('Cookie') ?? ''

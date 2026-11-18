@@ -92,12 +92,16 @@ jobs:
             exit 1
           fi
           node --input-type=module -e "import assert from 'node:assert/strict'; import fs from 'node:fs'; const r=JSON.parse(fs.readFileSync(process.env.RETROASSEMBLY_MOUNTED_TEST_REPORT)); assert.equal(r.passed,false); assert.match(r.error,/\/app\/roms must be a Docker read-only mount/); assert.equal(r.cleanupErrors,undefined)"
-      - name: Real browser, read-only mounts and restart persistence
+      - name: Same-image root and subpath browser, read-only and persistence acceptance
         env:
           RETROASSEMBLY_MOUNTED_TEST_IMAGE: ${{ env.TEST_IMAGE }}
           RETROASSEMBLY_MOUNTED_TEST_BROWSER: chromium
           RETROASSEMBLY_MOUNTED_TEST_REPORT: node_modules/.cache/ci/built-image.json
-        run: node tests/e2e/mounted-library-docker.ts
+        run: |
+          node tests/e2e/mounted-library-docker.ts
+          RETROASSEMBLY_MOUNTED_TEST_BASE_URL=/games/retroassembly \
+          RETROASSEMBLY_MOUNTED_TEST_REPORT=node_modules/.cache/ci/built-image-subpath.json \
+          node tests/e2e/mounted-library-docker.ts
       - name: Preserve the exact accepted image for trusted publication
         if: github.repository == 'long2know/retroassembly' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: |
@@ -207,17 +211,21 @@ jobs:
           test "$(docker image inspect "$IMAGE@$DIGEST" --format '{{index .Config.Labels "org.opencontainers.image.source"}}')" = https://github.com/long2know/retroassembly
           test "$(docker image inspect "$IMAGE@$DIGEST" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
           test "$(docker image inspect "$IMAGE@$DIGEST" --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}')" = MIT
-      - name: Real acceptance against registry-pulled digest
+      - name: Root and subpath acceptance against the same registry-pulled digest
         env:
           RETROASSEMBLY_MOUNTED_TEST_IMAGE: ${{ env.IMAGE }}@${{ env.DIGEST }}
           RETROASSEMBLY_MOUNTED_TEST_BROWSER: chromium
           RETROASSEMBLY_MOUNTED_TEST_REPORT: node_modules/.cache/ci/registry-image.json
-        run: node tests/e2e/mounted-library-docker.ts
+        run: |
+          node tests/e2e/mounted-library-docker.ts
+          RETROASSEMBLY_MOUNTED_TEST_BASE_URL=/games/retroassembly \
+          RETROASSEMBLY_MOUNTED_TEST_REPORT=node_modules/.cache/ci/registry-image-subpath.json \
+          node tests/e2e/mounted-library-docker.ts
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: registry-image-acceptance-${{ github.run_attempt }}
-          path: node_modules/.cache/ci/registry-image.json
+          path: node_modules/.cache/ci/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30

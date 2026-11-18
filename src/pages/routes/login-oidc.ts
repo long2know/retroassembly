@@ -7,7 +7,8 @@ import {
   randomPKCECodeVerifier,
   randomState,
 } from 'openid-client'
-import { getAuthMode, getSafeRedirectTo } from '#@/utils/server/auth.ts'
+import { withBasePath } from '#@/utils/isomorphic/base-url.ts'
+import { getAuthMode, getSafeRedirectTo, getSafeRouterRedirectTo } from '#@/utils/server/auth.ts'
 import { getOidcCallbackUrl, getOidcConfiguration, getOidcSettings } from '#@/utils/server/oidc.ts'
 import { isSecureRequest } from '#@/utils/server/session.ts'
 import type { Route } from './+types/login-oidc.ts'
@@ -15,7 +16,6 @@ import type { Route } from './+types/login-oidc.ts'
 const flowCookieOptions = {
   httpOnly: true,
   maxAge: 10 * 60,
-  path: '/login/oidc/callback',
   sameSite: 'Lax',
 } as const
 
@@ -27,7 +27,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const redirectTo = getSafeRedirectTo(new URL(request.url).searchParams.get('redirect_to'))
   if (c.var.currentUser) {
-    throw c.redirect(redirectTo)
+    throw c.redirect(getSafeRouterRedirectTo(redirectTo))
   }
 
   const configuration = await getOidcConfiguration()
@@ -36,7 +36,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const nonce = randomNonce()
   const state = randomState()
   const secure = isSecureRequest() || new URL(getOidcCallbackUrl()).protocol === 'https:'
-  const options = { ...flowCookieOptions, secure }
+  const options = { ...flowCookieOptions, path: withBasePath('/login/oidc/callback'), secure }
   setCookie(c, 'oidc-code-verifier', codeVerifier, options)
   setCookie(c, 'oidc-nonce', nonce, options)
   setCookie(c, 'oidc-redirect-to', redirectTo, options)

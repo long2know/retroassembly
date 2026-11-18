@@ -12,4 +12,5 @@ export default {
       await fs.move('dist/scripts', 'dist/server', { overwrite: true })
     }
   },
+  routeDiscovery: { mode: 'lazy' },
 } satisfies Config

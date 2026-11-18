@@ -1,6 +1,6 @@
 import { getContext } from 'hono/context-storage'
 import { countUsers } from '#@/controllers/users/count-users.ts'
-import { getAuthMode, getSafeRedirectTo } from '#@/utils/server/auth.ts'
+import { getAuthMode, getSafeRedirectTo, getSafeRouterRedirectTo } from '#@/utils/server/auth.ts'
 import { LoginPage } from '../login/page.tsx'
 import type { Route } from './+types/login.ts'
 
@@ -11,7 +11,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const redirectTo = getSafeRedirectTo(searchParams.get('redirect_to'))
 
   if (currentUser) {
-    throw c.redirect(redirectTo)
+    throw c.redirect(getSafeRouterRedirectTo(redirectTo))
   }
 
   const authMode = getAuthMode()
@@ -34,7 +34,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         return { error, formType, redirectTo, title: t('auth.login') }
       }
 
-      throw c.redirect(redirectTo)
+      throw c.redirect(getSafeRouterRedirectTo(redirectTo))
     }
 
     return { formType, redirectTo, title: t('auth.login') }

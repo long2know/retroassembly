@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 import { Outlet } from 'react-router'
 import { metadata } from '#@/constants/metadata.ts'
 import { localeCodes } from '#@/locales/locales.ts'
+import { withBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { getHomePath } from '#@/utils/isomorphic/misc.ts'
 import { getCommonLoaderData } from '#@/utils/server/loader-data.ts'
 import type { Route } from './+types/root.ts'
@@ -21,14 +22,14 @@ export function loader({ request }) {
     throw c.redirect(metadata.link)
   }
 
-  const path = c.req.path.endsWith('.data') ? c.req.path.slice(0, -5) : c.req.path
+  const path = c.var.appPath.endsWith('.data') ? c.var.appPath.slice(0, -5) : c.var.appPath
   const matched = match('/{:language}')(path)
   const isHome =
     matched &&
     (!matched.params.language || localeCodes.some((localeCode) => localeCode.toLowerCase() === matched.params.language))
   const homeHeadElements = localeCodes.map((localeCode) => ({
     props: {
-      href: new URL(getHomePath(localeCode.toLowerCase()), new URL(request.url)).href,
+      href: new URL(withBasePath(getHomePath(localeCode.toLowerCase())), new URL(request.url)).href,
       hrefLang: localeCode,
       key: localeCode,
       rel: 'alternate',

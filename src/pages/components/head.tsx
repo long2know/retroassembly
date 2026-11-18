@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Links, Meta, useLoaderData } from 'react-router'
 import { metadata } from '#@/constants/metadata.ts'
 import type { loader } from '#@/pages/root.tsx'
+import { withBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { cdnHost, libretroThumbnailsHost } from '#@/utils/isomorphic/cdn.ts'
 
 export function Head() {
@@ -31,11 +32,11 @@ export function Head() {
       <meta content={t(metadata.descriptionI18nKey)} name='description' />
       <link href={metadata.link} rel='canonical' />
 
-      <link href='/assets/logo/logo-192x192.png' rel='icon' sizes='any' />
-      <link href='/assets/logo/logo.svg' rel='icon' type='image/svg+xml' />
-      <link href='/assets/logo/apple-touch-icon.png' rel='apple-touch-icon' sizes='any' />
+      <link href={withBasePath('/assets/logo/logo-192x192.png')} rel='icon' sizes='any' />
+      <link href={withBasePath('/assets/logo/logo.svg')} rel='icon' type='image/svg+xml' />
+      <link href={withBasePath('/assets/logo/apple-touch-icon.png')} rel='apple-touch-icon' sizes='any' />
 
-      <link href='/manifest.webmanifest' rel='manifest' />
+      <link href={withBasePath('/manifest.webmanifest')} rel='manifest' />
 
       <meta content='website' property='og:type' />
       <meta content={metadata.link} property='og:url' />

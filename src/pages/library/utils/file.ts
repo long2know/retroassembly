@@ -1,4 +1,5 @@
 import { BlobReader, BlobWriter, ZipReader } from '@zip.js/zip.js'
+import { withBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { getFileMd5 } from '#@/utils/isomorphic/misc.ts'
 
 function isTinyFile(file: File) {
@@ -47,7 +48,7 @@ export async function getROMMd5(file: File, platform: string) {
 
 export function getFileUrl(fileId: string) {
   if (fileId) {
-    return `/api/v1/files/${encodeURIComponent(fileId)}`
+    return withBasePath(`/api/v1/files/${encodeURIComponent(fileId)}`)
   }
   throw new Error('File ID is required to get the file URL')
 }
