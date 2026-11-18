@@ -123,7 +123,7 @@ await describe('runtime server base-path contract', async () => {
       app.route(basePath, api)
       app.get(withBasePath('/manifest.webmanifest'), (c) => c.json(getWebManifest()))
       app.get(withBasePath('/session'), (c) => {
-        setSessionCookie('fixture-token', new Date('2030-01-01'), false)
+        setSessionCookie('fixture-token', new Date(Date.now() + 60_000), false)
         return c.json({ callback: getOidcCallbackUrl() })
       })
       app.all('*', (c) => handler(c.req.raw, new RouterContextProvider()))
