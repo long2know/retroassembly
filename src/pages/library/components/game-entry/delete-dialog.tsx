@@ -6,11 +6,12 @@ import { useTranslation } from 'react-i18next'
 import { mutate } from 'swr'
 import useSWRMutation from 'swr/mutation'
 import { client } from '#@/api/client.ts'
+import type { MountedSource } from '#@/constants/mounted-library.ts'
 import { useGameActions } from '../../hooks/use-game-actions.ts'
 import { useRouter } from '../../hooks/use-router.ts'
 
 interface DeleteDialogProps extends AlertDialog.RootProps {
-  rom: { id: string }
+  rom: { id: string; mountedSource?: MountedSource | null }
 }
 
 const { ':id': romsEndpoint } = client.roms
@@ -61,7 +62,7 @@ export function DeleteDialog({ rom, ...props }: Readonly<DeleteDialogProps>) {
       <AlertDialog.Content maxWidth='450px'>
         <AlertDialog.Title>{action.text}</AlertDialog.Title>
         <AlertDialog.Description className='leading-loose! whitespace-pre-line' size='2'>
-          {action.confirmDescription}
+          {type === 'roms' && rom.mountedSource ? t('mountedLibrary.confirmHide') : action.confirmDescription}
         </AlertDialog.Description>
 
         <div className='mt-4 flex justify-end gap-3'>

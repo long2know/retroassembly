@@ -1,15 +1,27 @@
 import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
+import { getContext } from 'hono/context-storage'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { isMountedLibraryEnabled } from '#@/constants/env.ts'
 import { isPlatformName, type PlatformName } from '#@/constants/platform.ts'
+import { getSuperUser } from '#@/controllers/users/get-super-user.ts'
 import { getMountedLibrary } from '#@/utils/server/mounted-library-runtime.ts'
 
 function requireMountedLibrary() {
   const library = isMountedLibraryEnabled() ? getMountedLibrary() : undefined
   if (!library) {
     throw new HTTPException(404, { message: 'Mounted library is not enabled' })
+  }
+  return library
+}
+
+async function requireMountedLibraryAdministrator() {
+  const library = requireMountedLibrary()
+  const { currentUser } = getContext().var
+  const superUser = await getSuperUser()
+  if (!superUser || superUser.id !== currentUser?.id) {
+    throw new HTTPException(403, { message: 'Forbidden' })
   }
   return library
 }
@@ -26,6 +38,15 @@ const metadataScope = z.object({ platform: z.custom<PlatformName>(isPlatformName
 
 export const mountedLibrary = new Hono()
   .get('', (c) => c.json(requireMountedLibrary().getStatus()))
+  .get('hidden', async (c) => {
+    const library = await requireMountedLibraryAdministrator()
+    c.header('Cache-Control', 'private, no-store')
+    return c.json(library.listHiddenGames())
+  })
+  .post('hidden/:id/restore', async (c) => {
+    const library = await requireMountedLibraryAdministrator()
+    return c.json(await library.restoreHiddenGame(c.req.param('id')))
+  })
   .patch(
     '',
     zValidator(

@@ -419,5 +419,14 @@
   "mountedLibrary.saveInterval": "保存扫描间隔",
   "mountedLibrary.invalidInterval": "请输入 0 到 86400 秒之间的整数。",
   "mountedLibrary.settingsSaved": "共享库设置已保存。",
-  "mountedLibrary.warnings": "扫描警告（{{count}}）"
+  "mountedLibrary.warnings": "扫描警告（{{count}}）",
+  "mountedLibrary.confirmHide": "挂载游戏将对所有用户隐藏，但不会删除源文件。管理员可以在游戏库设置中恢复它们。",
+  "mountedLibrary.hiddenGames": "已隐藏的挂载游戏",
+  "mountedLibrary.hiddenDescription": "可用状态以已保存的索引为准。恢复前会再次检查文件。",
+  "mountedLibrary.hiddenEmpty": "没有已隐藏的挂载游戏。",
+  "mountedLibrary.hiddenLoading": "正在加载已隐藏的游戏…",
+  "mountedLibrary.hiddenLoadFailed": "无法加载已隐藏的游戏。",
+  "mountedLibrary.hiddenUnavailable": "已保存的索引显示文件不可用。请在“ROM / 元数据”中扫描 ROM 文件夹。",
+  "mountedLibrary.restoreForEveryone": "为所有用户恢复",
+  "mountedLibrary.restoreFailed": "无法恢复游戏。请重新加载列表。如果文件缺失或已更改，请先扫描 ROM 文件夹再重试。"
 }

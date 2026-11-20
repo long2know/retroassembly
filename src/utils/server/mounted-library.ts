@@ -56,6 +56,10 @@ function visibleMountedCondition(platform?: PlatformName) {
   )
 }
 
+function hiddenMountedCondition() {
+  return and(eq(romTable.status, statusEnum.deleted), isNull(romTable.userId), isNotNull(romTable.mountedSource))
+}
+
 export function createMountedLibrary(library: Library, configuration: MountedConfiguration) {
   library
     .insert(mountedLibrarySettingsTable)
@@ -301,6 +305,68 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
     } finally {
       scanning = undefined
     }
+  }
+
+  function listHiddenGames() {
+    return library
+      .select({
+        available: sql`json_extract(${romTable.mountedSource}, '$.available') = 1`.mapWith(Boolean),
+        fileName: romTable.fileName,
+        gameName: romTable.gameName,
+        id: romTable.id,
+        platform: romTable.platform,
+      })
+      .from(romTable)
+      .where(hiddenMountedCondition())
+      .orderBy(sql`coalesce(${romTable.gameName}, ${romTable.fileName})`, romTable.id)
+      .all()
+  }
+
+  async function restoreHiddenGame(id: string) {
+    const target = and(eq(romTable.id, id), hiddenMountedCondition())
+    const rom = library
+      .select({ fileId: romTable.fileId, source: romTable.mountedSource })
+      .from(romTable)
+      .where(target)
+      .get()
+    if (!rom?.source) {
+      throw new HTTPException(404, { message: 'Hidden mounted ROM not found' })
+    }
+    const { available, path: relative, revision } = rom.source
+    if (!available) {
+      throw new HTTPException(409, { message: 'Hidden mounted ROM is unavailable in the index; rescan required' })
+    }
+    let currentRevision
+    try {
+      if (rom.fileId !== getMountedFileId('roms', relative)) {
+        throw new Error('Mounted file identity does not match the saved index')
+      }
+      const current = await getMountedFileInfo(configuration.roms, relative)
+      currentRevision = current.revision
+    } catch (error) {
+      throw new HTTPException(503, { cause: error, message: 'Mounted source unavailable or unsafe; rescan required' })
+    }
+    if (currentRevision !== revision) {
+      throw new HTTPException(409, { message: 'Mounted file changed; rescan the mounted library before restoring' })
+    }
+    const restored = library
+      .update(romTable)
+      .set({ status: statusEnum.normal })
+      .where(
+        and(
+          target,
+          eq(romTable.fileId, rom.fileId),
+          sql`json_extract(${romTable.mountedSource}, '$.available') = 1`,
+          sql`json_extract(${romTable.mountedSource}, '$.path') = ${relative}`,
+          sql`json_extract(${romTable.mountedSource}, '$.revision') = ${revision}`,
+        ),
+      )
+      .returning({ id: romTable.id })
+      .get()
+    if (!restored) {
+      throw new HTTPException(409, { message: 'Hidden mounted ROM changed; reload the hidden games list' })
+    }
+    return restored
   }
 
   async function readFile(id: string, signal?: AbortSignal) {
@@ -608,10 +674,12 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
         root: configuration.roms,
       })
     },
+    listHiddenGames,
     readFile,
     refreshMetadata(options: { platform?: PlatformName; retryArtwork?: boolean } = {}) {
       return startMetadataJob('metadata', options)
     },
+    restoreHiddenGame,
     retryArtwork(options: { platform?: PlatformName } = {}) {
       return startMetadataJob('artwork', options)
     },

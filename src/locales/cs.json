@@ -419,5 +419,14 @@
   "mountedLibrary.saveInterval": "Uložit interval prohledávání",
   "mountedLibrary.invalidInterval": "Zadejte celé číslo od 0 do 86400 sekund.",
   "mountedLibrary.settingsSaved": "Nastavení sdílené knihovny bylo uloženo.",
-  "mountedLibrary.warnings": "Upozornění prohledávání ({{count}})"
+  "mountedLibrary.warnings": "Upozornění prohledávání ({{count}})",
+  "mountedLibrary.confirmHide": "Připojené hry se skryjí všem bez smazání zdrojových souborů. Správce je může obnovit v nastavení knihovny.",
+  "mountedLibrary.hiddenGames": "Skryté připojené hry",
+  "mountedLibrary.hiddenDescription": "Dostupnost vychází z uloženého indexu. Před obnovením se soubor znovu zkontroluje.",
+  "mountedLibrary.hiddenEmpty": "Žádné připojené hry nejsou skryté.",
+  "mountedLibrary.hiddenLoading": "Načítání skrytých her…",
+  "mountedLibrary.hiddenLoadFailed": "Skryté hry se nepodařilo načíst.",
+  "mountedLibrary.hiddenUnavailable": "Podle uloženého indexu není soubor dostupný. Prohledejte složky ROM v části ROM / Metadata.",
+  "mountedLibrary.restoreForEveryone": "Obnovit pro všechny",
+  "mountedLibrary.restoreFailed": "Hru se nepodařilo obnovit. Načtěte seznam znovu. Pokud soubor chybí nebo se změnil, před dalším pokusem prohledejte složky ROM."
 }

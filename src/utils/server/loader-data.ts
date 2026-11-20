@@ -5,6 +5,7 @@ import { getRunTimeEnv, isMountedLibraryEnabled, isMountedLibraryOnly } from '#@
 import { metadata } from '#@/constants/metadata.ts'
 import { cookieConsentStatusKey } from '#@/constants/misc.ts'
 import { getLaunchRecords } from '#@/controllers/launch-records/get-launch-records.ts'
+import { getSuperUser } from '#@/controllers/users/get-super-user.ts'
 import { getBasePath } from '#@/utils/isomorphic/base-url.ts'
 import { getAuthMode } from '#@/utils/server/auth.ts'
 import { getMountedLibrary } from '#@/utils/server/mounted-library-runtime.ts'
@@ -51,6 +52,14 @@ export function getCommonLoaderData<T>(data: T = {} as T) {
 
 /* Used for routes under /library and needing recently launched ROMs */
 export async function getLibraryLoaderData<T>(data: T = {} as T) {
-  const { roms: recentlyLaunchedRoms } = await getLaunchRecords({ pageSize: 20 })
-  return getCommonLoaderData({ ...data, recentlyLaunchedRoms })
+  const { currentUser } = getContext().var
+  const [{ roms: recentlyLaunchedRoms }, superUser] = await Promise.all([
+    getLaunchRecords({ pageSize: 20 }),
+    isMountedLibraryEnabled() && currentUser ? getSuperUser() : undefined,
+  ])
+  return getCommonLoaderData({
+    ...data,
+    canRestoreMountedGames: Boolean(superUser && superUser.id === currentUser.id),
+    recentlyLaunchedRoms,
+  })
 }

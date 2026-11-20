@@ -66,6 +66,7 @@ function providerMatches(providerContainer: string) {
 }
 
 test('mounted sources remain immutable through content matching, settings, browser play and two restarts', async ({
+  browser,
   page,
 }) => {
   const container = process.env.RETROASSEMBLY_MOUNTED_TEST_CONTAINER
@@ -79,7 +80,8 @@ test('mounted sources remain immutable through content matching, settings, brows
   }
   const deployment = new URL(process.env.RETROASSEMBLY_MOUNTED_TEST_URL || '')
   const basePath = deployment.pathname.replace(/\/$/u, '')
-  const applicationMenu = page.locator('button[aria-label="Menu"][aria-haspopup="menu"]')
+  const applicationMenuSelector = 'button[aria-label="Menu"][aria-haspopup="menu"]'
+  const applicationMenu = page.locator(applicationMenuSelector)
   function appPath(pathname: string) {
     return `${basePath}${pathname}`
   }
@@ -138,10 +140,10 @@ test('mounted sources remain immutable through content matching, settings, brows
       .toBe(false)
   }
 
-  async function openSettings() {
-    await applicationMenu.click()
-    await page.getByRole('menuitem', { exact: true, name: 'Settings' }).click()
-    return page.getByRole('dialog', { exact: true, name: 'Settings' })
+  async function openSettings(target = page) {
+    await target.locator(applicationMenuSelector).click()
+    await target.getByRole('menuitem', { exact: true, name: 'Settings' }).click()
+    return target.getByRole('dialog', { exact: true, name: 'Settings' })
   }
 
   const coreRequests: { status: number; url: string }[] = []
@@ -606,6 +608,71 @@ test('mounted sources remain immutable through content matching, settings, brows
   })
   await settings.getByTitle('Close', { exact: true }).click()
   await page.goto(appPath('/library/roms'))
+  const restoreScreenshot =
+    await test.step('the administrator can restore a shared hide in Library settings', async () => {
+      const game = page.locator('.game-entry').filter({ hasText: override })
+      await game.hover()
+      await game.locator('..').getByRole('button', { exact: true, name: 'Menu' }).click()
+      await page.getByRole('menuitem', { exact: true, name: 'Delete the ROM' }).click()
+      const confirmation = page.getByRole('alertdialog')
+      await expect(confirmation).toContainText('An administrator can restore them in Library settings.')
+      await confirmation.getByRole('button', { exact: true, name: 'Delete' }).click()
+      await expect(game).toHaveCount(0)
+      const rescan = await page.request.post(appPath('/api/v1/mounted-library'))
+      expect(rescan.status(), await rescan.text()).toBe(200)
+      expect(await rescan.json()).toMatchObject({ indexed: 1 })
+
+      const visitor = await browser.newContext({ baseURL: deployment.origin })
+      const hiddenPath = appPath('/api/v1/mounted-library/hidden')
+      const restorePath = `${hiddenPath}/${rom.id}/restore`
+      try {
+        const registration = await visitor.request.post(appPath('/api/v1/auth/register'), {
+          form: { password: `fixture-only-${randomUUID()}`, username: `viewer-${randomUUID().slice(0, 8)}` },
+        })
+        expect(registration.status(), await registration.text()).toBe(200)
+        const visitorPage = await visitor.newPage()
+        await visitorPage.goto(appPath('/library/roms'))
+        await expect(visitorPage.locator('.game-entry').filter({ hasText: override })).toHaveCount(0)
+        const visitorSettings = await openSettings(visitorPage)
+        await visitorSettings.getByRole('tab', { exact: true, name: 'Library' }).click()
+        await expect(visitorSettings.getByRole('heading', { name: 'Hidden mounted games' })).toHaveCount(0)
+        const [forbiddenList, forbiddenRestore] = await Promise.all([
+          visitor.request.get(hiddenPath),
+          visitor.request.post(restorePath),
+        ])
+        expect(forbiddenList.status()).toBe(403)
+        expect(forbiddenRestore.status()).toBe(403)
+
+        const librarySettings = await openSettings()
+        await librarySettings.getByRole('tab', { exact: true, name: 'Library' }).click()
+        const hiddenGames = librarySettings.getByRole('region', { name: 'Hidden mounted games' })
+        const hiddenGame = hiddenGames.getByRole('listitem').filter({ hasText: override })
+        await expect(hiddenGame).toContainText('Homebrew/Immutable Pulse.nes')
+        const restoreButton = hiddenGame.getByRole('button', { exact: true, name: 'Restore for everyone' })
+        await expect(restoreButton).toBeEnabled()
+        const screenshot = {
+          path: path.join(reportDirectory, `restore-mounted-games${basePath ? '-subpath' : ''}.png`),
+          url: page.url(),
+        }
+        await page.screenshot({ path: screenshot.path })
+        const restoreResponse = page.waitForResponse(function restored(response) {
+          return new URL(response.url()).pathname === restorePath && response.request().method() === 'POST'
+        })
+        await restoreButton.click()
+        const restored = await restoreResponse
+        expect(restored.status(), await restored.text()).toBe(200)
+        expect(await restored.json()).toEqual({ id: rom.id })
+        await expect(hiddenGames.getByText('No mounted games are hidden.')).toBeVisible()
+        await expect(librarySettings.getByTestId('platform-count-nes')).toHaveText('Indexed: 2')
+        await librarySettings.getByTitle('Close', { exact: true }).click()
+        await expect(game).toBeVisible()
+        await visitorPage.reload()
+        await expect(visitorPage.locator('.game-entry').filter({ hasText: override })).toBeVisible()
+        return screenshot
+      } finally {
+        await visitor.close()
+      }
+    })
   await page.getByText(override, { exact: true }).first().click()
   const beforeRestartMatches = providerMatches(provider)
 
@@ -709,6 +776,7 @@ test('mounted sources remain immutable through content matching, settings, brows
       providerMatches: providerMatches(provider),
       resources,
       restarts: 2,
+      restoreScreenshot,
       resumedCanvasFrames: [resumedFrame, resumedChangedFrame],
       romId: rom.id,
       romPageUrl,
