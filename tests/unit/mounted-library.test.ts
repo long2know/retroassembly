@@ -32,6 +32,7 @@ import {
   romTable,
   sessionTable,
   stateTable,
+  statusEnum,
   userTable,
 } from '#@/databases/schema.ts'
 import { auth } from '#@/middlewares/auth.ts'
@@ -221,8 +222,8 @@ async function fixture(t: TestContext, files: Record<string, string | Uint8Array
   connections.push(library)
   migrate(library, { migrationsFolder: 'src/databases/migrations' })
   await library.insert(userTable).values([
-    { id: 'alice', username: 'Alice' },
-    { id: 'bob', libraryMode: libraryModeEnum.shared, username: 'Bob' },
+    { createdAt: new Date(2), id: 'bob', libraryMode: libraryModeEnum.shared, username: 'Bob' },
+    { createdAt: new Date(1), id: 'alice', username: 'Alice' },
   ])
   for (const user of ['alice', 'bob']) {
     await library.insert(sessionTable).values({
@@ -537,6 +538,184 @@ await describe('mounted shared library', async () => {
     assert.deepEqual(await sourceSnapshot(f.roms), before)
     const [hidden] = await f.library.select().from(romTable).where(eq(romTable.id, rom.id))
     assert.equal(hidden.status, 0)
+  })
+
+  await it('allows only the oldest active account to restore a hidden mounted ROM without changing private activity', async (t) => {
+    const f = await fixture(t, {
+      ...defaultFiles,
+      'bios/nes.pal': 'synthetic palette',
+      'roms/NES/Visible.nes': 'visible',
+    })
+    const { roms } = await f.list()
+    const rom = roms.find((candidate) => candidate.fileName === 'Nested/雪 & Hero.NES')
+    const visible = roms.find((candidate) => candidate.fileName === 'Visible.nes')
+    assert.ok(rom)
+    assert.ok(visible)
+    const listUrl = '/mounted-library/hidden'
+    const restoreUrl = `${listUrl}/${rom.id}/restore`
+    const restore = { method: 'POST' }
+    const before = { bios: await sourceSnapshot(f.bios), roms: await sourceSnapshot(f.roms) }
+    await f.library.insert(userTable).values({
+      createdAt: new Date(0),
+      status: statusEnum.deleted,
+      username: 'Inactive former admin',
+    })
+    await f.library.insert(romTable).values({
+      fileId: 'roms/nes/deleted-upload.nes',
+      fileName: 'Deleted upload.nes',
+      id: 'deleted-upload',
+      platform: 'nes',
+      status: statusEnum.deleted,
+      userId: 'alice',
+    })
+    const patch = new FormData()
+    patch.set('gameName', 'Corrected mounted title')
+    patch.set('gameDescription', 'App-owned correction')
+    await expectStatus(f.request(`/roms/${rom.id}`, { body: patch, method: 'PATCH' }, 'bob'), 200)
+    const art = new FormData()
+    art.set('file', new File(['app-owned artwork'], 'cover.png', { type: 'image/png' }))
+    const artResponse = await expectStatus(
+      f.request(`/roms/${rom.id}/boxart`, { body: art, method: 'POST' }, 'bob'),
+      200,
+    )
+    const artId = z.string().parse(await artResponse.json())
+    await expectStatus(
+      f.request('/favorites', {
+        body: JSON.stringify({ romId: rom.id }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      }),
+      200,
+    )
+    const launchForm = new FormData()
+    launchForm.set('rom', rom.id)
+    launchForm.set('core', 'fceumm')
+    for (const user of ['alice', 'bob']) {
+      await expectStatus(f.request('/launch_records', { body: launchForm, method: 'POST' }, user), 200)
+    }
+    const stateForm = new FormData()
+    stateForm.set('core', 'fceumm')
+    stateForm.set('rom', rom.id)
+    stateForm.set('state', new Blob(['private state']))
+    stateForm.set('thumbnail', new Blob(['private thumbnail']))
+    stateForm.set('type', 'manual')
+    const stateResponse = await expectStatus(f.request('/states', { body: stateForm, method: 'POST' }, 'bob'), 200)
+    const state = z.object({ fileId: z.string(), id: z.string() }).parse(await stateResponse.json())
+
+    await expectStatus(f.request(`/roms/${rom.id}`, { method: 'DELETE' }, 'bob'), 200)
+    await f.mounted.scan()
+    for (const user of ['alice', 'bob']) {
+      const { roms: visibleRoms } = await f.list(user)
+      assert.deepEqual(
+        visibleRoms.map(({ id }) => id),
+        [visible.id],
+      )
+      await expectStatus(f.request(`/roms/${rom.id}`, {}, user), 404)
+    }
+    await expectStatus(f.request(`/roms/${rom.id}/content`), 404)
+    await expectStatus(f.request(`/files/${encodeURIComponent(rom.fileId)}`), 404)
+    await expectStatus(f.request(listUrl, {}, 'bob'), 403)
+    await expectStatus(f.request(restoreUrl, restore, 'bob'), 403)
+    await expectStatus(f.request(listUrl, {}, ''), 400)
+    await expectStatus(f.request(restoreUrl, restore, ''), 400)
+
+    const hidden = await expectStatus(f.request(listUrl), 200)
+    assert.equal(hidden.headers.get('Cache-Control'), 'private, no-store')
+    assert.deepEqual(await hidden.json(), [
+      { available: true, fileName: rom.fileName, gameName: 'Corrected mounted title', id: rom.id, platform: 'nes' },
+    ])
+    for (const id of ['deleted-upload', visible.id, 'missing']) {
+      await expectStatus(f.request(`${listUrl}/${id}/restore`, restore), 404)
+    }
+    process.env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY = 'false'
+    await expectStatus(f.request(listUrl), 404)
+    await expectStatus(f.request(restoreUrl, restore), 404)
+    process.env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY = 'true'
+
+    const restored = await expectStatus(f.request(restoreUrl, restore), 200)
+    assert.deepEqual(await restored.json(), { id: rom.id })
+    const empty = await expectStatus(f.request(listUrl), 200)
+    assert.deepEqual(await empty.json(), [])
+    await expectStatus(f.request(restoreUrl, restore), 404)
+    assert.equal(f.mounted.getStatus().indexed, 2)
+    for (const user of ['alice', 'bob']) {
+      const response = await expectStatus(f.request(`/roms/${rom.id}`, {}, user), 200)
+      const restoredRom = romResponse.extend({ gameDescription: z.string() }).parse(await response.json())
+      assert.equal(restoredRom.id, rom.id)
+      assert.equal(restoredRom.fileId, rom.fileId)
+      assert.equal(restoredRom.gameName, 'Corrected mounted title')
+      assert.equal(restoredRom.gameDescription, 'App-owned correction')
+      assert.equal(restoredRom.gameBoxartFileIds, artId)
+      assert.equal(Boolean(restoredRom.isFavorite), user === 'alice')
+      const history = await expectStatus(f.request('/launch_records', {}, user), 200)
+      const historyRoms = z.object({ roms: z.array(z.object({ id: z.string() })) }).parse(await history.json()).roms
+      assert.deepEqual(historyRoms, user === 'alice' ? [{ id: rom.id }] : [])
+    }
+    const cover = await expectStatus(f.request(`/files/${encodeURIComponent(artId)}`), 200)
+    assert.equal(await cover.text(), 'app-owned artwork')
+    const stateUrl = `/files/${encodeURIComponent(state.fileId)}`
+    await expectStatus(f.request(stateUrl), 404)
+    const ownedState = await expectStatus(f.request(stateUrl, {}, 'bob'), 200)
+    assert.equal(await ownedState.text(), 'private state')
+    assert.deepEqual({ bios: await sourceSnapshot(f.bios), roms: await sourceSnapshot(f.roms) }, before)
+  })
+
+  await it('keeps changed, missing, and unreconciled sources hidden until a valid rescan', async (t) => {
+    const f = await fixture(t)
+    const {
+      roms: [rom],
+    } = await f.list()
+    assert.ok(rom.mountedSource)
+    const listUrl = '/mounted-library/hidden'
+    const restoreUrl = `${listUrl}/${rom.id}/restore`
+    const restore = { method: 'POST' }
+    await expectStatus(f.request(`/roms/${rom.id}`, { method: 'DELETE' }), 200)
+    await writeFixture(f.roms, rom.mountedSource.path, 'new synthetic bytes')
+    const changed = await expectStatus(f.request(restoreUrl, restore), 409)
+    assert.match(await changed.text(), /file changed/u)
+
+    await rm(path.join(f.roms, rom.mountedSource.path))
+    const missing = await expectStatus(f.request(restoreUrl, restore), 503)
+    assert.match(await missing.text(), /source unavailable or unsafe/u)
+    await f.mounted.scan()
+    const hidden = await expectStatus(f.request(listUrl), 200)
+    const entry = { available: false, fileName: rom.fileName, gameName: null, id: rom.id, platform: 'nes' }
+    assert.deepEqual(await hidden.json(), [entry])
+
+    await writeFixture(f.roms, rom.mountedSource.path, 'returned synthetic bytes')
+    const unreconciled = await expectStatus(f.request(restoreUrl, restore), 409)
+    assert.match(await unreconciled.text(), /unavailable in the index/u)
+    await expectStatus(f.request(`/roms/${rom.id}`), 404)
+    await f.mounted.scan()
+    const rescanned = await expectStatus(f.request(listUrl), 200)
+    assert.deepEqual(await rescanned.json(), [{ ...entry, available: true }])
+    await expectStatus(f.request(restoreUrl, restore), 200)
+    const content = await expectStatus(f.request(`/roms/${rom.id}/content`), 200)
+    assert.equal(await content.text(), 'returned synthetic bytes')
+  })
+
+  await it('does not restore a source reconciled as unavailable while the restore is in flight', async (t) => {
+    const f = await fixture(t)
+    const {
+      roms: [rom],
+    } = await f.list()
+    assert.ok(rom.mountedSource)
+    const filename = path.join(f.roms, rom.mountedSource.path)
+    await expectStatus(f.request(`/roms/${rom.id}`, { method: 'DELETE' }), 200)
+    trackFileHandles(t, function reconcileAfterFileCheck(handle) {
+      const { close } = handle
+      t.mock.method(handle, 'close', async function removeAndScan() {
+        await close()
+        await rm(filename)
+        await f.mounted.scan()
+      })
+    })
+    const response = await expectStatus(f.request(`/mounted-library/hidden/${rom.id}/restore`, { method: 'POST' }), 409)
+    assert.match(await response.text(), /hidden mounted ROM changed/iu)
+    const hidden = await expectStatus(f.request('/mounted-library/hidden'), 200)
+    assert.deepEqual(await hidden.json(), [
+      { available: false, fileName: rom.fileName, gameName: null, id: rom.id, platform: 'nes' },
+    ])
   })
 
   await it('discovers only expected BIOS names recursively, validates checksums, and supplies core virtual names', async (t) => {

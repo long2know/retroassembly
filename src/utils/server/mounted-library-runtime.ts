@@ -16,13 +16,23 @@ export interface MountedMetadataMatch {
   name?: string
 }
 
+interface HiddenMountedGame {
+  available: boolean
+  fileName: string
+  gameName: string | null
+  id: string
+  platform: PlatformName
+}
+
 interface MountedLibraryRuntime {
   assertWritableDirectory: (directory: string) => Promise<void>
   enrichPending: () => Promise<void>
   getBioses: (platform: PlatformName) => MountedBios[]
   getStatus: () => MountedScanStatus
   identify: (rom: typeof romTable.$inferSelect, match: MountedMetadataMatch) => Promise<typeof romTable.$inferSelect>
+  listHiddenGames: () => HiddenMountedGame[]
   refreshMetadata: (options?: { platform?: PlatformName; retryArtwork?: boolean }) => MountedLibraryStatus
+  restoreHiddenGame: (id: string) => Promise<{ id: string }>
   retryArtwork: (options?: { platform?: PlatformName }) => MountedLibraryStatus
   updateSettings: (settings: Partial<MountedLibrarySettings>) => MountedLibraryStatus
   readFile: (id: string, signal?: AbortSignal) => Promise<{ body: ReadableStream; httpEtag: string; size: number }>

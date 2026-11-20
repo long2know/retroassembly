@@ -419,5 +419,14 @@
   "mountedLibrary.saveInterval": "Сохранить интервал сканирования",
   "mountedLibrary.invalidInterval": "Введите целое число от 0 до 86400 секунд.",
   "mountedLibrary.settingsSaved": "Настройки общей библиотеки сохранены.",
-  "mountedLibrary.warnings": "Предупреждения сканирования ({{count}})"
+  "mountedLibrary.warnings": "Предупреждения сканирования ({{count}})",
+  "mountedLibrary.confirmHide": "Игры из подключённых папок скрываются для всех без удаления исходных файлов. Администратор может восстановить их в настройках библиотеки.",
+  "mountedLibrary.hiddenGames": "Скрытые игры из подключённых папок",
+  "mountedLibrary.hiddenDescription": "Доступность определяется по сохранённому индексу. Перед восстановлением файл проверяется ещё раз.",
+  "mountedLibrary.hiddenEmpty": "Нет скрытых игр из подключённых папок.",
+  "mountedLibrary.hiddenLoading": "Загрузка скрытых игр…",
+  "mountedLibrary.hiddenLoadFailed": "Не удалось загрузить скрытые игры.",
+  "mountedLibrary.hiddenUnavailable": "Недоступно по сохранённому индексу. Просканируйте папки ROM в разделе «ROM / Метаданные».",
+  "mountedLibrary.restoreForEveryone": "Восстановить для всех",
+  "mountedLibrary.restoreFailed": "Не удалось восстановить игру. Обновите список. Если файл отсутствует или изменился, просканируйте папки ROM перед повторной попыткой."
 }

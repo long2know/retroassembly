@@ -419,5 +419,14 @@
   "mountedLibrary.saveInterval": "Save scan interval",
   "mountedLibrary.invalidInterval": "Enter a whole number from 0 to 86400 seconds.",
   "mountedLibrary.settingsSaved": "Shared-library settings saved.",
-  "mountedLibrary.warnings": "Scan warnings ({{count}})"
+  "mountedLibrary.warnings": "Scan warnings ({{count}})",
+  "mountedLibrary.confirmHide": "Mounted games are hidden for everyone without deleting their source files. An administrator can restore them in Library settings.",
+  "mountedLibrary.hiddenGames": "Hidden mounted games",
+  "mountedLibrary.hiddenDescription": "Availability is based on the saved index. The file is checked again before restoring.",
+  "mountedLibrary.hiddenEmpty": "No mounted games are hidden.",
+  "mountedLibrary.hiddenLoading": "Loading hidden games…",
+  "mountedLibrary.hiddenLoadFailed": "Hidden games could not be loaded.",
+  "mountedLibrary.hiddenUnavailable": "Unavailable in the saved index. Scan ROM folders in ROM / Metadata.",
+  "mountedLibrary.restoreForEveryone": "Restore for everyone",
+  "mountedLibrary.restoreFailed": "Could not restore the game. Reload the list and, if the file is missing or changed, scan ROM folders before trying again."
 }

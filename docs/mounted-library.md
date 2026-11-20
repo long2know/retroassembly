@@ -51,8 +51,13 @@ platforms; explicitly saved platform filters are respected.
 Shared titles/descriptions, manual matching, uploaded artwork, and hides are
 app-wide metadata edits. Deleting a mounted game hides its database row for all
 users; rescanning does not undo that hide and never unlinks the source.
-Restoring an intentionally hidden row currently requires an app database
-administrative operation; no restore UI is provided.
+The app administrator (the oldest active account) can open **Settings → Library
+→ Hidden mounted games** and select **Restore for everyone**. This makes the
+same game visible again, retaining its metadata, artwork, and private favorites
+and savestates. It does not recover deleted launch history or uploaded ROMs.
+Availability in the hidden list reflects the saved index. If a ROM is missing
+or has changed, make it available again and run **Scan ROM folders** under
+**ROM / Metadata** before retrying the restore.
 
 Scans are idempotent and coalesce concurrent requests. Only a complete,
 successful enumeration reconciles missing files. An inaccessible/replaced root
@@ -85,6 +90,16 @@ Authenticated API endpoints:
   startup reconciliation. Environment values seed new settings, not upgrades.
 - `POST /api/v1/mounted-library`: reconcile source folders, preserving previous
   rows on partial or failed scans. This retains the existing no-body contract.
+- `GET /api/v1/mounted-library/hidden`: administrator-only list of hidden
+  mounted games, including entries marked unavailable in the index. It returns
+  IDs, display names, filenames relative to their system folders, platforms,
+  and indexed availability without exposing mount paths or reading ROMs.
+- `POST /api/v1/mounted-library/hidden/:id/restore`: administrator-only restore
+  of a hidden game whose source still matches the saved index. This checks
+  one source without writing files or reading ROM bytes. Returns `404` for
+  non-hidden/non-mounted or unknown IDs, `409` for unavailable or changed index
+  entries or an unscanned replacement, and `503` if the source cannot be opened
+  safely. Failed checks do not change the row.
 - `POST /api/v1/mounted-library/metadata`: JSON `{ "platform": "nes",
   "retryArtwork": false }` (both optional). Explicitly re-identify all available
   non-manual rows, including earlier misses and filename-only matches, using

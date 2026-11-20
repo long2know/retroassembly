@@ -419,5 +419,14 @@
   "mountedLibrary.saveInterval": "儲存掃描間隔",
   "mountedLibrary.invalidInterval": "請輸入 0 到 86400 秒之間的整數。",
   "mountedLibrary.settingsSaved": "共享收藏庫設定已儲存。",
-  "mountedLibrary.warnings": "掃描警告（{{count}}）"
+  "mountedLibrary.warnings": "掃描警告（{{count}}）",
+  "mountedLibrary.confirmHide": "掛載遊戲會對所有使用者隱藏，但不會刪除來源檔案。管理員可在收藏庫設定中還原。",
+  "mountedLibrary.hiddenGames": "已隱藏的掛載遊戲",
+  "mountedLibrary.hiddenDescription": "可用狀態以已儲存的索引為準。還原前會再次檢查檔案。",
+  "mountedLibrary.hiddenEmpty": "沒有已隱藏的掛載遊戲。",
+  "mountedLibrary.hiddenLoading": "正在載入已隱藏的遊戲…",
+  "mountedLibrary.hiddenLoadFailed": "無法載入已隱藏的遊戲。",
+  "mountedLibrary.hiddenUnavailable": "已儲存的索引顯示檔案無法使用。請在「ROM / 中繼資料」中掃描 ROM 資料夾。",
+  "mountedLibrary.restoreForEveryone": "為所有使用者還原",
+  "mountedLibrary.restoreFailed": "無法還原遊戲。請重新載入清單。如果檔案遺失或已變更，請先掃描 ROM 資料夾再試一次。"
 }

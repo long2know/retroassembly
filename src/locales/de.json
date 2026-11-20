@@ -419,5 +419,14 @@
   "mountedLibrary.saveInterval": "Scanintervall speichern",
   "mountedLibrary.invalidInterval": "Gib eine ganze Zahl zwischen 0 und 86400 Sekunden ein.",
   "mountedLibrary.settingsSaved": "Einstellungen der gemeinsamen Bibliothek gespeichert.",
-  "mountedLibrary.warnings": "Scanwarnungen ({{count}})"
+  "mountedLibrary.warnings": "Scanwarnungen ({{count}})",
+  "mountedLibrary.confirmHide": "Eingebundene Spiele werden für alle ausgeblendet, ohne ihre Quelldateien zu löschen. Ein Administrator kann sie in den Bibliothekseinstellungen wiederherstellen.",
+  "mountedLibrary.hiddenGames": "Ausgeblendete eingebundene Spiele",
+  "mountedLibrary.hiddenDescription": "Die Verfügbarkeit basiert auf dem gespeicherten Index. Vor dem Wiederherstellen wird die Datei erneut geprüft.",
+  "mountedLibrary.hiddenEmpty": "Keine eingebundenen Spiele sind ausgeblendet.",
+  "mountedLibrary.hiddenLoading": "Ausgeblendete Spiele werden geladen…",
+  "mountedLibrary.hiddenLoadFailed": "Ausgeblendete Spiele konnten nicht geladen werden.",
+  "mountedLibrary.hiddenUnavailable": "Laut gespeichertem Index nicht verfügbar. Durchsuche die ROM-Ordner unter ROM / Metadaten.",
+  "mountedLibrary.restoreForEveryone": "Für alle wiederherstellen",
+  "mountedLibrary.restoreFailed": "Das Spiel konnte nicht wiederhergestellt werden. Lade die Liste neu. Falls die Datei fehlt oder geändert wurde, durchsuche vor dem nächsten Versuch die ROM-Ordner."
 }

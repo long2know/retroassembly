@@ -166,7 +166,8 @@ export async function getMountedPath(root: MountedRoot, relative: string) {
 
 export async function openMountedFile(root: MountedRoot, relative: string) {
   const filename = await getMountedPath(root, relative)
-  const handle = await open(filename, constants.O_RDONLY + constants.O_NOFOLLOW)
+  // An indexed file may have been replaced by a FIFO since the scan.
+  const handle = await open(filename, constants.O_RDONLY + constants.O_NOFOLLOW + constants.O_NONBLOCK)
   try {
     const actualPath =
       process.platform === 'linux' ? await realpath(`/proc/self/fd/${handle.fd}`) : await realpath(filename)

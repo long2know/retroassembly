@@ -419,5 +419,14 @@
   "mountedLibrary.saveInterval": "Salvar intervalo de verificação",
   "mountedLibrary.invalidInterval": "Digite um número inteiro de 0 a 86400 segundos.",
   "mountedLibrary.settingsSaved": "Configurações da biblioteca compartilhada salvas.",
-  "mountedLibrary.warnings": "Avisos da verificação ({{count}})"
+  "mountedLibrary.warnings": "Avisos da verificação ({{count}})",
+  "mountedLibrary.confirmHide": "Os jogos montados são ocultados para todos sem excluir seus arquivos de origem. Um administrador pode restaurá-los nas configurações da biblioteca.",
+  "mountedLibrary.hiddenGames": "Jogos montados ocultos",
+  "mountedLibrary.hiddenDescription": "A disponibilidade se baseia no índice salvo. O arquivo é verificado novamente antes da restauração.",
+  "mountedLibrary.hiddenEmpty": "Nenhum jogo montado está oculto.",
+  "mountedLibrary.hiddenLoading": "Carregando jogos ocultos…",
+  "mountedLibrary.hiddenLoadFailed": "Não foi possível carregar os jogos ocultos.",
+  "mountedLibrary.hiddenUnavailable": "Indisponível no índice salvo. Verifique as pastas de ROMs na seção ROM / Metadados.",
+  "mountedLibrary.restoreForEveryone": "Restaurar para todos",
+  "mountedLibrary.restoreFailed": "Não foi possível restaurar o jogo. Recarregue a lista. Se o arquivo estiver ausente ou tiver mudado, verifique as pastas de ROMs antes de tentar novamente."
 }

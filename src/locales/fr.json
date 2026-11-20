@@ -419,5 +419,14 @@
   "mountedLibrary.saveInterval": "Enregistrer l’intervalle d’analyse",
   "mountedLibrary.invalidInterval": "Saisissez un nombre entier de 0 à 86400 secondes.",
   "mountedLibrary.settingsSaved": "Paramètres de la bibliothèque partagée enregistrés.",
-  "mountedLibrary.warnings": "Avertissements de l’analyse ({{count}})"
+  "mountedLibrary.warnings": "Avertissements de l’analyse ({{count}})",
+  "mountedLibrary.confirmHide": "Les jeux montés sont masqués pour tout le monde sans supprimer leurs fichiers sources. Un administrateur peut les restaurer dans les paramètres de la bibliothèque.",
+  "mountedLibrary.hiddenGames": "Jeux montés masqués",
+  "mountedLibrary.hiddenDescription": "La disponibilité se base sur l’index enregistré. Le fichier est vérifié à nouveau avant la restauration.",
+  "mountedLibrary.hiddenEmpty": "Aucun jeu monté n’est masqué.",
+  "mountedLibrary.hiddenLoading": "Chargement des jeux masqués…",
+  "mountedLibrary.hiddenLoadFailed": "Impossible de charger les jeux masqués.",
+  "mountedLibrary.hiddenUnavailable": "Indisponible dans l’index enregistré. Analysez les dossiers de ROM dans ROM / Métadonnées.",
+  "mountedLibrary.restoreForEveryone": "Restaurer pour tout le monde",
+  "mountedLibrary.restoreFailed": "Impossible de restaurer le jeu. Rechargez la liste. Si le fichier est manquant ou a changé, analysez les dossiers de ROM avant de réessayer."
 }
