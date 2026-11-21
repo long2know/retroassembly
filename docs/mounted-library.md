@@ -175,9 +175,18 @@ to the emulator that made them and are available when you switch back.
 Auto-save retention still applies per ROM, across all emulators.
 
 Before serving this version, self-hosted Workers deployments must apply any
-pending D1 migrations, including `0011_mounted_playlist_states.sql`, to their
-library database. The new state metadata is nullable; existing saves are
-unchanged. Node applies migrations automatically at startup.
+pending D1 migrations, including `0011_mounted_playlist_states.sql` and
+`0012_private_game_collections.sql`, to their library database. Existing saves
+are unchanged. Node applies migrations automatically at startup.
+
+## Private game collections
+
+Open **Collections** in library navigation to create a private list, then use
+**Collections** on a game's details page to add or remove it. Lists can contain
+mounted, uploaded, or shared-library games across platforms, even if their
+platforms are disabled in your browse settings. A hidden or unavailable game
+is not shown or counted until it becomes visible again. Removing a game from
+a collection or deleting the collection does not change the ROM or its files.
 
 ## Metadata and covers
 

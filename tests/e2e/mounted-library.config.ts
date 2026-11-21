@@ -5,7 +5,12 @@ export default defineConfig({
   reporter: 'line',
   retries: 0,
   testDir: '.',
-  testMatch: ['mounted-library.spec.ts', 'mounted-psx-playlist.spec.ts', 'per-game-emulator.spec.ts'],
+  testMatch: [
+    'mounted-library.spec.ts',
+    'mounted-psx-playlist.spec.ts',
+    'per-game-emulator.spec.ts',
+    'private-game-collections.spec.ts',
+  ],
   timeout: 240_000,
   use: {
     baseURL: process.env.RETROASSEMBLY_MOUNTED_TEST_URL,

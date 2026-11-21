@@ -1,3 +1,4 @@
+import { clsx } from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useLoaderData } from 'react-router'
 import type { loader } from '#@/pages/routes/library-platform-rom.tsx'
@@ -7,17 +8,20 @@ import { GameButtons } from '../../components/game-buttons/game-buttons.tsx'
 import LibraryLayout from '../../components/library-layout/library-layout.tsx'
 import { PageBreadcrumb } from '../../components/page-breadcrumb.tsx'
 import { RomBackground } from '../../components/rom-background.tsx'
+import { useIsDemo } from '../../hooks/use-demo.ts'
 import { useViewport } from '../../hooks/use-viewport.ts'
 import { GameCover } from './components/game-cover.tsx'
 import { GameInfoDialog } from './components/game-info-dialog/game-info-dialog.tsx'
 import { GameInfo } from './components/game-info.tsx'
 import { GameMediaDialog } from './components/game-media-dialog/game-media-dialog.tsx'
 import { GameMedia } from './components/game-media/game-media.tsx'
+import { RomCollectionsDialog } from './components/rom-collections-dialog.tsx'
 
 export default function RomPage() {
   const { t } = useTranslation()
+  const isDemo = useIsDemo()
   const { isLargeScreen } = useViewport()
-  const { gameCorePreference, rom } = useLoaderData<typeof loader>()
+  const { currentUser, gameCorePreference, rom } = useLoaderData<typeof loader>()
 
   const goodcodes = getRomGoodcodes(rom)
   const launchboxGame = rom.rawGameMetadata?.launchbox
@@ -41,9 +45,12 @@ export default function RomPage() {
           </div>
 
           <div className='flex flex-1 flex-col gap-8'>
-            <div className='flex items-center gap-3 pt-4 lg:px-8'>
+            <div className={clsx('flex items-center gap-3 pt-4 lg:px-8', { 'flex-wrap': !isDemo })}>
               <h1 className='text-3xl font-bold'>{goodcodes.rom}</h1>
               <FavoriteButton rom={rom} variant='inline' />
+              {currentUser && !isDemo ? (
+                <RomCollectionsDialog key={rom.id} romId={rom.id} userId={currentUser.id} />
+              ) : null}
             </div>
 
             <div className='flex flex-col gap-8 lg:flex-col-reverse'>

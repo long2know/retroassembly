@@ -1,4 +1,4 @@
-import type { MouseEvent } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 import { getRomUrl } from '#@/pages/library/utils/rom.ts'
 import { useSelectedGames } from '../../atoms.ts'
 import { useIsDemo } from '../../hooks/use-demo.ts'
@@ -9,13 +9,13 @@ import { GameEntryImage } from './game-entry-image.tsx'
 import { GamePlatform } from './game-platform.tsx'
 import { GameTitle } from './game-title.tsx'
 
-export function GameEntry({ rom }) {
+export function GameEntry({ actions, rom }: Readonly<{ actions?: ReactNode; rom: any }>) {
   const isDemo = useIsDemo()
 
   const [selectedGames, setSelectedGames] = useSelectedGames()
 
   const url = getRomUrl(rom, isDemo)
-  const selecting = selectedGames.length > 0
+  const selecting = actions === undefined && selectedGames.length > 0
   function handleClick(event: MouseEvent<HTMLAnchorElement>) {
     if (selecting) {
       event.preventDefault()
@@ -50,8 +50,14 @@ export function GameEntry({ rom }) {
           </>
         )}
       </NavigatableLink>
-      {isDemo ? null : <FavoriteButton rom={rom} variant='overlay' />}
-      <GameEntryDropdownMenu rom={rom} />
+      {actions === undefined ? (
+        <>
+          {isDemo ? null : <FavoriteButton rom={rom} variant='overlay' />}
+          <GameEntryDropdownMenu rom={rom} />
+        </>
+      ) : (
+        actions
+      )}
     </div>
   )
 }
