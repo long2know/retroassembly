@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { constants } from 'node:fs'
+import { constants, type BigIntStats } from 'node:fs'
 import { access, lstat, open, readdir, realpath, stat, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { getRuntimeKey } from 'hono/adapter'
@@ -146,6 +146,12 @@ export function getMountedFileId(kind: 'bios' | 'roms', relative: string) {
   return `mounted/${kind}/${createHash('sha256').update(relative).digest('hex')}`
 }
 
+export function getMountedFileRevision(info: BigIntStats) {
+  return createHash('sha256')
+    .update(`${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`)
+    .digest('hex')
+}
+
 export async function getMountedPath(root: MountedRoot, relative: string) {
   validateMountedRelativePath(relative)
   await assertMountedRootAvailable(root)
@@ -178,9 +184,7 @@ export async function openMountedFile(root: MountedRoot, relative: string) {
     if (!info.isFile() || !hasReadPermission(info.mode)) {
       throw new Error('Mounted source is not a readable regular file')
     }
-    const revision = createHash('sha256')
-      .update(`${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`)
-      .digest('hex')
+    const revision = getMountedFileRevision(info)
     return { handle, revision, size: Number(info.size) }
   } catch (error) {
     await handle.close()

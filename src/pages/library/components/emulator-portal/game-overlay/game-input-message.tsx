@@ -6,6 +6,7 @@ import { useGamepads } from '#@/pages/library/hooks/use-gamepads.ts'
 import { useInputMapping } from '#@/pages/library/hooks/use-input-mapping.ts'
 import { usePreference } from '#@/pages/library/hooks/use-preference.ts'
 import { useRom } from '#@/pages/library/hooks/use-rom.ts'
+import { useEmulatorSession } from '../emulator-session-provider.tsx'
 import { GameInputMessageItem } from './game-input-message-item.tsx'
 
 export function GameInputMessage() {
@@ -14,8 +15,10 @@ export function GameInputMessage() {
   const gamepadMapping = useGamepadMapping()
   const { keyboard: keyboardMapping } = useInputMapping()
   const { preference } = usePreference()
+  const { activeEmulator } = useEmulatorSession()
   const rom = useRom()
-  const rewindEnabled = rom ? preference.emulator.platform[rom.platform].rewindEnabled : true
+  const rewindEnabled =
+    !activeEmulator?.playlistPlayback && (rom ? preference.emulator.platform[rom.platform].rewindEnabled : true)
 
   const messages: { keyNames: string[]; message: ReactNode }[] = connected
     ? [

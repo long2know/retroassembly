@@ -10,6 +10,7 @@ import { getRomGoodcodes } from '#@/utils/client/library.ts'
 import { useEmulator } from '../hooks/use-emulator.ts'
 import { useGameOverlay } from '../hooks/use-game-overlay.ts'
 import { ControllerButton } from './controller-button.tsx'
+import { GameDiscs } from './game-discs.tsx'
 import { GameInputMessage } from './game-input-message.tsx'
 import { GameOverlayButtons } from './game-overlay-buttons.tsx'
 import { GameStates } from './game-states.tsx'
@@ -30,7 +31,7 @@ export function GameOverlayContent() {
   const goodcodes = getRomGoodcodes(rom)
   const { data: cover } = useRomCover(rom)
   const isDemo = useIsDemo()
-  const { emulator, isFullscreen, toggleFullscreen } = useEmulator()
+  const { emulator, isFullscreen, playlistPlayback, toggleFullscreen } = useEmulator()
 
   useEffect(() => {
     const status = emulator?.getStatus()
@@ -69,6 +70,7 @@ export function GameOverlayContent() {
             <div className='game-overlay-buttons flex flex-col gap-5 lg:flex-row'>
               <GameOverlayButtons />
             </div>
+            {playlistPlayback ? <GameDiscs playback={playlistPlayback} /> : null}
             {isDemo ? null : <GameStates />}
           </div>
 

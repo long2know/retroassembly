@@ -47,7 +47,27 @@ export interface MountedLibraryStatus {
   metadata: MountedMetadataProgress
 }
 
-export interface MountedSource {
+export interface MountedMediaFile {
+  path: string
+  revision: string
+}
+
+export interface MountedPlaylist {
+  discs: MountedMediaFile[]
+  revision: string
+}
+
+export interface MountedPlaylistState {
+  disc: number
+  revision: string
+}
+
+export interface MountedPlaylistIssue {
+  code: 'Duplicate' | 'Encoding' | 'Format' | 'Missing' | 'Path' | 'TooFew' | 'TooLarge' | 'TooMany'
+  line?: number
+}
+
+export interface MountedSource extends MountedMediaFile {
   available: boolean
   metadata: 'disabled' | 'pending' | 'ready' | 'error' | 'manual'
   metadataError?: string
@@ -57,15 +77,33 @@ export interface MountedSource {
   artworkError?: string
   artworkAttemptedAt?: number
   identification?: MountedIdentification
-  path: string
-  revision: string
+  playlist?: MountedPlaylist
+  playlistIssue?: MountedPlaylistIssue
   unsupportedReason?: string
 }
 
 export const mountedFilePrefix = 'mounted/'
+export const mountedPlaylistMaxBytes = 64 * 1024
+export const mountedPlaylistMaxDiscs = 8
+export const mountedRevisionPattern = /^[a-f0-9]{64}$/u
 
 export function isMountedFileId(id: string) {
   return id.startsWith(mountedFilePrefix)
+}
+
+export function isCompatiblePlaylistState(playlist?: MountedPlaylist, state?: MountedPlaylistState | null) {
+  if (!playlist) {
+    return !state
+  }
+  if (!state) {
+    return false
+  }
+  return (
+    state.revision === playlist.revision &&
+    Number.isInteger(state.disc) &&
+    state.disc >= 1 &&
+    state.disc <= playlist.discs.length
+  )
 }
 
 const systemAliases: Record<string, PlatformName> = {
@@ -114,14 +152,15 @@ const knownRomExtensions = new Set([
 ])
 
 export function getMountedFormat(platform: PlatformName, extension: string) {
-  if (platformMap[platform].fileExtensions.includes(extension.toLowerCase())) {
+  const ext = extension.toLowerCase()
+  if (platformMap[platform].fileExtensions.includes(ext) || (platform === 'psx' && ext === '.m3u')) {
     return { supported: true }
   }
-  if (['.cue', '.m3u', '.m3u8', '.iso', '.ccd', '.gdi', '.pbp'].includes(extension.toLowerCase())) {
+  if (['.cue', '.m3u', '.m3u8', '.iso', '.ccd', '.gdi', '.pbp'].includes(ext)) {
     return {
       supported: false,
       unsupportedReason:
-        'This mounted disc/playlist format is not supported by this browser integration. CUE/M3U dependencies are not loaded. PlayStation currently requires a standalone CHD. No source conversion is performed.',
+        'This mounted disc/playlist format is not supported. For PlayStation, use a standalone CHD or an M3U listing only CHDs. No source conversion is performed.',
     }
   }
   if (knownRomExtensions.has(extension.toLowerCase())) {

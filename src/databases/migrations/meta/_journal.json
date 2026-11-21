@@ -78,6 +78,13 @@
       "when": 1795219989269,
       "tag": "0010_rom_core_preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1795225226934,
+      "tag": "0011_mounted_playlist_states",
+      "breakpoints": true
     }
   ]
 }

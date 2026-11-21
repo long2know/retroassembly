@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import useSWRMutation from 'swr/mutation'
 import type { client } from '#@/api/client.ts'
+import { isCompatiblePlaylistState } from '#@/constants/mounted-library.ts'
 import { usePreference } from '#@/pages/library/hooks/use-preference.ts'
 import { getFileUrl } from '#@/pages/library/utils/file.ts'
 import { dateFormatMap } from '#@/utils/isomorphic/i18n.ts'
@@ -18,24 +19,34 @@ export function GameState({
 }: Readonly<{ state: Extract<InferResponseType<typeof client.states.$get>, any[]>[number] }>) {
   const { i18n, t } = useTranslation()
   const { preference } = usePreference()
-  const { hide, setIsPending } = useGameOverlay()
-  const { core, emulator } = useEmulator()
+  const { hide, isPending, setIsPending } = useGameOverlay()
+  const { core, emulator, playlist, playlistPlayback } = useEmulator()
   const [loaded, setLoaded] = useState(false)
   const [errored, setErrored] = useState(false)
-  const { isMutating, trigger: loadState } = useSWRMutation(
-    getFileUrl(state.fileId),
-    (url) => emulator?.loadState(url),
-    { onSuccess: hide },
+  const [loadFailed, setLoadFailed] = useState(false)
+  const { isMutating, trigger: loadState } = useSWRMutation(getFileUrl(state.fileId), (url) =>
+    playlistPlayback && state.playlist ? playlistPlayback.loadState(url, state.playlist) : emulator?.loadState(url),
   )
 
-  const loadable = core === state.core
-  const disabled = !loadable || isMutating
+  const compatible = isCompatiblePlaylistState(playlist, state.playlist)
+  const loadable = compatible && core === state.core
+  const disabled = !loadable || isMutating || isPending
   const dateFormat = preference.ui.dateFormat === 'auto' ? dateFormatMap[i18n.language] : preference.ui.dateFormat
 
   async function handleClick() {
+    if (disabled) {
+      return
+    }
+    setLoadFailed(false)
     setIsPending(true)
     try {
       await loadState()
+      await hide()
+    } catch (error) {
+      if (!playlist) {
+        throw error
+      }
+      setLoadFailed(true)
     } finally {
       setIsPending(false)
     }
@@ -63,6 +74,7 @@ export function GameState({
         })}
         disabled={disabled}
         onClick={handleClick}
+        title={compatible ? undefined : t('emulator.playlistStateOutdated')}
         type='button'
       >
         <div
@@ -88,7 +100,7 @@ export function GameState({
           )}
           {loadable ? null : (
             <div className='absolute right-0 bottom-0 rounded-tl-lg bg-black px-1 py-0.5 text-xs text-white'>
-              {state.core}
+              {compatible ? state.core : t('emulator.playlistStateOutdated')}
             </div>
           )}
         </div>
@@ -107,6 +119,11 @@ export function GameState({
           )}
         </div>
       </button>
+      {loadFailed && playlist ? (
+        <p className='max-w-48 text-sm text-red-300' role='alert'>
+          {t('error.failedToLoadPlaylistState')}
+        </p>
+      ) : null}
       <GameStateDelete id={state.id} />
     </div>
   )

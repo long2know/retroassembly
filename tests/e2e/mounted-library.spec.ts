@@ -4,6 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { MountedLibraryStatus, MountedSource } from '../../src/constants/mounted-library.ts'
+import { syntheticPsxRomCount } from './fixtures/synthetic-psx.ts'
 
 interface Rom {
   fileId: string
@@ -252,11 +253,11 @@ test('mounted sources remain immutable through content matching, settings, brows
       },
       { timeout: 30_000 },
     )
-    .toBe(2)
+    .toBe(2 + syntheticPsxRomCount)
   const firstScan = await page.request.post(appPath('/api/v1/mounted-library'))
   expect(firstScan.status()).toBe(200)
   const firstStatus = await page.request.get(appPath('/api/v1/mounted-library'))
-  expect(await firstStatus.json()).toMatchObject({ indexed: 2 })
+  expect(await firstStatus.json()).toMatchObject({ indexed: 2 + syntheticPsxRomCount })
 
   async function findRom() {
     const response = await page.request.get(appPath('/api/v1/roms/search?query=Immutable%20Pulse'))
@@ -471,7 +472,8 @@ test('mounted sources remain immutable through content matching, settings, brows
   expect(enabled.status()).toBe(200)
   await expect(settings.getByRole('checkbox', { exact: true, name: 'NES' })).toBeChecked()
   const enabledPreferences = await page.request.get(appPath('/api/v1/preference'))
-  expect(await enabledPreferences.json()).toMatchObject({ ui: { platforms: ['nes'] } })
+  const { ui }: { ui: { platforms: string[] } } = await enabledPreferences.json()
+  expect(ui.platforms.toSorted()).toEqual(['nes', 'psx'])
   const counts = await mountedStatus()
   expect(
     counts.platforms.find(function nes(platform) {
@@ -598,7 +600,7 @@ test('mounted sources remain immutable through content matching, settings, brows
   await metadataIdle()
   expect(providerMatches(provider)).toBe(beforeExplicitScanMatches)
   const scanStatus = await mountedStatus()
-  expect(scanStatus.indexed).toBe(2)
+  expect(scanStatus.indexed).toBe(2 + syntheticPsxRomCount)
   expect(await identificationCache()).toEqual(initialIdentification)
   expect(await findRom()).toMatchObject({
     gameBoxartFileIds: coverFileId,
@@ -620,7 +622,7 @@ test('mounted sources remain immutable through content matching, settings, brows
       await expect(game).toHaveCount(0)
       const rescan = await page.request.post(appPath('/api/v1/mounted-library'))
       expect(rescan.status(), await rescan.text()).toBe(200)
-      expect(await rescan.json()).toMatchObject({ indexed: 1 })
+      expect(await rescan.json()).toMatchObject({ indexed: 1 + syntheticPsxRomCount })
 
       const visitor = await browser.newContext({ baseURL: deployment.origin })
       const hiddenPath = appPath('/api/v1/mounted-library/hidden')

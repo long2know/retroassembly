@@ -3,6 +3,7 @@ import { clsx } from 'clsx'
 import { type MouseEvent, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useRevalidator } from 'react-router'
+import { mountedPlaylistMaxDiscs } from '#@/constants/mounted-library.ts'
 import { platformMap } from '#@/constants/platform.ts'
 import type { GameCorePreference } from '#@/controllers/preference/rom-core-preference.ts'
 import { useLaunchButton } from '#@/pages/library/atoms.ts'
@@ -32,12 +33,20 @@ export function GameButtons({ gameCorePreference }: Readonly<{ gameCorePreferenc
   const platformName = t(platformMap[rom.platform].displayNameI18nKey)
 
   if (rom.mountedSource?.unsupportedReason) {
+    const { playlistIssue, unsupportedReason } = rom.mountedSource
     return (
       <Callout.Root>
         <Callout.Icon>
           <span className='icon-[mdi--warning]' />
         </Callout.Icon>
-        <Callout.Text>{rom.mountedSource.unsupportedReason}</Callout.Text>
+        <Callout.Text>
+          {playlistIssue
+            ? t(`mountedLibrary.playlist${playlistIssue.code}`, {
+                line: playlistIssue.line,
+                maxDiscs: mountedPlaylistMaxDiscs,
+              })
+            : unsupportedReason}
+        </Callout.Text>
       </Callout.Root>
     )
   }
@@ -71,7 +80,16 @@ function GameButtonsContent({ isChangingCore }: Readonly<{ isChangingCore: boole
   const rom = useRom()
   const { t } = useTranslation()
   const { state: revalidationState } = useRevalidator()
-  const { error, isPreparing, launch, prepare, resumeState: state } = useEmulator()
+  const {
+    error,
+    isPreparing,
+    launch,
+    playlist,
+    playlistStartFailed,
+    prepare,
+    resumeState: state,
+    setPlaylistStartFailed,
+  } = useEmulator()
   const [, setLaunchButton] = useLaunchButton()
   const { syncStyle } = useFocusIndicator()
   const { preference } = usePreference()
@@ -116,6 +134,7 @@ function GameButtonsContent({ isChangingCore }: Readonly<{ isChangingCore: boole
 
   async function handleClickRetry() {
     if (!isPending) {
+      setPlaylistStartFailed(false)
       await prepare()
     }
   }
@@ -124,11 +143,14 @@ function GameButtonsContent({ isChangingCore }: Readonly<{ isChangingCore: boole
     return <BioseMissingMessage bioses={missingBioses} />
   }
 
-  if (!isPending && error) {
+  if (!isPending && (error || playlistStartFailed)) {
+    const preparationError = playlist ? 'error.failedToChangeDisc' : 'error.failedToLoadEmulator'
     return (
       <div className='flex h-16 w-full items-center justify-center gap-2 rounded bg-(--accent-3) lg:w-80'>
         <span className='icon-[mdi--warning-decagram]' />
-        <span className='text-sm opacity-60'>{t('error.failedToLoadEmulator')}</span>
+        <span className='text-sm opacity-60'>
+          {t(playlistStartFailed ? 'error.failedToStartPlaylist' : preparationError)}
+        </span>
         <Button onClick={handleClickRetry} size='1' type='button'>
           <span className='icon-[mdi--reload]' />
           {t('common.retry')}

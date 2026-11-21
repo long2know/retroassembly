@@ -133,11 +133,40 @@ validity. Uploaded BIOS remains a fallback when a mounted match is unavailable
 or the feature is disabled.
 
 Supported standalone extensions remain the upstream platform lists (including
-standalone PlayStation CHD). CUE/M3U/ISO and other recognized disc/playlist
-formats appear with an explicit unsupported-format explanation and cannot be
-launched. This initial fork does not load their track/playlist dependencies.
+standalone PlayStation CHD). Mounted PlayStation `.m3u` playlists are supported
+as described below. CUE, ISO, M3U8, mixed-format playlists and playlists for
+other systems are not playable. The scanner shows why a recognized format or
+playlist is unsupported; it never converts source files.
 Archive/core/ROM-set compatibility is still the upstream browser runtime’s
 responsibility; indexing a supported extension is not a compatibility guarantee.
+
+### PlayStation disc playlists
+
+Put a UTF-8 `.m3u` file (up to 64 KiB) under a mounted `psx` or `ps1` folder.
+List **two to eight distinct CHDs**, one per line in play order, using the
+exact names and case on disk. Relative paths may go into subfolders beside the
+playlist: for example, `Disc 1.chd` and `Discs/Disc 2.chd`. Blank lines, `#`
+comments and an initial UTF-8 BOM are allowed. Absolute paths, URLs,
+backslashes, `.`/`..` segments, percent escapes, symlinks, duplicate discs and
+nested playlists are not allowed. Fix any reported line and rescan; one bad
+entry prevents the playlist from launching but does not hide standalone CHDs.
+
+The playlist boots disc 1 with PCSX ReARMed. When the game asks for another
+disc, open the in-game overlay and choose it under **Change disc**. Later
+discs are downloaded on demand. If you skip an unloaded disc, the core needs
+that image too; it is downloaded when you make the jump, not at launch. If a
+download fails before the tray opens, the current disc stays active and you can
+retry. If a file changes or disappears, rescan and reload the game. Existing
+individual CHD entries, favorites and saves are unchanged.
+
+Manual and automatic playlist saves remember the disc and the indexed playlist
+revision. **Continue** or loading an in-game save selects the right disc first.
+Changing the playlist or replacing a disc can make old playlist saves
+incompatible; those saves are kept, but cannot load on the new revision.
+Standalone CHD saves, external states and native saves are not imported into
+playlists. Rewind and its controls are disabled for playlists so rewind cannot
+load a snapshot from another disc. Playlist playback is for Node mounts only,
+not uploads or Workers.
 
 On platforms with more than one emulator, use **Emulator for this game** on a
 game’s details page to choose one just for your account. Choose **Platform
@@ -146,8 +175,9 @@ to the emulator that made them and are available when you switch back.
 Auto-save retention still applies per ROM, across all emulators.
 
 Before serving this version, self-hosted Workers deployments must apply any
-pending D1 migrations, including `0010_rom_core_preferences.sql`, to their
-library database. Node applies migrations automatically at startup.
+pending D1 migrations, including `0011_mounted_playlist_states.sql`, to their
+library database. The new state metadata is nullable; existing saves are
+unchanged. Node applies migrations automatically at startup.
 
 ## Metadata and covers
 
