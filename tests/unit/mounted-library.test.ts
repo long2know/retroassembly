@@ -25,10 +25,12 @@ import { matchRoutes } from 'react-router'
 import { z } from 'zod'
 import { app as api } from '#@/api/app.ts'
 import { getMountedFormat, resolveMountedPlatform } from '#@/constants/mounted-library.ts'
+import { getRomPlayback } from '#@/controllers/preference/rom-core-preference.ts'
 import {
   favoriteTable,
   launchRecordTable,
   libraryModeEnum,
+  romCorePreferenceTable,
   romTable,
   sessionTable,
   stateTable,
@@ -52,6 +54,7 @@ import { getMountedIdentification } from '#@/utils/server/mounted-identification
 import { setMountedLibrary } from '#@/utils/server/mounted-library-runtime.ts'
 import { createMountedLibrary } from '#@/utils/server/mounted-library.ts'
 import { cacheMountedCover, enrichMountedRom, getMountedCoverUrl } from '#@/utils/server/mounted-metadata.ts'
+import { requireRom } from '#@/utils/server/rom-access.ts'
 import { createFilesystemStorage, createStorage } from '#@/utils/server/storage.ts'
 import { createSupabase } from '#@/utils/server/supabase.ts'
 
@@ -93,6 +96,9 @@ function createFixtureApp(library: ReturnType<typeof createDrizzle>['library']) 
     await next()
   })
   app.use(globals(), auth())
+  app.get('/api/v1/fixture/playback/:id', async (c) =>
+    c.json(await getRomPlayback(await requireRom(c.req.param('id')))),
+  )
   app.route('', api)
   return app
 }
@@ -253,7 +259,26 @@ async function fixture(t: TestContext, files: Record<string, string | Uint8Array
     return romListResponse.parse(await response.json())
   }
 
-  return { bios, configuration, data, library, list, mounted, request, roms, root, storage }
+  async function setCore(romId: string, core: string | null, user = 'alice') {
+    return await request(
+      `/preference/roms/${romId}/core`,
+      { body: JSON.stringify({ core }), headers: { 'Content-Type': 'application/json' }, method: 'PUT' },
+      user,
+    )
+  }
+
+  async function playback(romId: string, user = 'alice') {
+    const response = await expectStatus(request(`/fixture/playback/${romId}`, undefined, user), 200)
+    return z
+      .object({
+        core: z.string(),
+        gameCorePreference: z.object({ override: z.string().nullable(), platformCore: z.string() }).nullable(),
+        state: z.object({ core: z.string(), id: z.string() }).optional(),
+      })
+      .parse(await response.json())
+  }
+
+  return { bios, configuration, data, library, list, mounted, playback, request, roms, root, setCore, storage }
 }
 
 const mountedStatusResponse = z.object({
@@ -484,6 +509,119 @@ await describe('mounted shared library', async () => {
     const [launchRecord] = await f.library.select().from(launchRecordTable)
     assert.equal(favoriteRecord.userId, 'alice')
     assert.equal(launchRecord.userId, 'alice')
+  })
+
+  await it('keeps ROM core choices private, preserves other-core states, and restores inheritance', async (t) => {
+    const f = await fixture(t, {
+      'roms/famicom/Pulse.nes': 'alternate source',
+      'roms/nes/Pulse.nes': 'original source',
+    })
+    const before = await sourceSnapshot(f.roms)
+    const { roms } = await f.list()
+    const game = roms.find((rom) => rom.mountedSource?.path === 'nes/Pulse.nes')
+    const sibling = roms.find((rom) => rom.mountedSource?.path === 'famicom/Pulse.nes')
+    assert.ok(game && sibling)
+    assert.equal(game.fileName, sibling.fileName)
+    for (const [index, core] of ['fceumm', 'nestopia'].entries()) {
+      await f.library.insert(stateTable).values({
+        core,
+        createdAt: new Date(index),
+        fileId: `${core}.state`,
+        id: `${core}-state`,
+        platform: 'nes',
+        romId: game.id,
+        thumbnailFileId: `${core}.png`,
+        type: 'manual',
+        userId: 'alice',
+      })
+    }
+
+    const defaultPlayback = await f.playback(game.id)
+    assert.equal(defaultPlayback.core, 'fceumm')
+    assert.deepEqual(defaultPlayback.state, { core: 'fceumm', id: 'fceumm-state' })
+    const [alice, bob] = await Promise.all([
+      expectStatus(f.setCore(game.id, 'nestopia'), 200),
+      expectStatus(f.setCore(game.id, 'quicknes', 'bob'), 200),
+    ])
+    assert.deepEqual(await alice.json(), { core: 'nestopia' })
+    assert.deepEqual(await bob.json(), { core: 'quicknes' })
+    assert.deepEqual(await f.playback(game.id), {
+      core: 'nestopia',
+      gameCorePreference: { override: 'nestopia', platformCore: 'fceumm' },
+      state: { core: 'nestopia', id: 'nestopia-state' },
+    })
+    const otherPlayback = await f.playback(game.id, 'bob')
+    assert.equal(otherPlayback.core, 'quicknes')
+    assert.equal(otherPlayback.state, undefined)
+    const siblingPlayback = await f.playback(sibling.id)
+    assert.equal(siblingPlayback.core, 'fceumm')
+
+    const reset = await expectStatus(f.setCore(game.id, null), 200)
+    assert.deepEqual(await reset.json(), { core: null })
+    assert.deepEqual(await f.playback(game.id), defaultPlayback)
+    await expectStatus(
+      f.request('/preference', {
+        body: JSON.stringify({ emulator: { platform: { nes: { core: 'quicknes' } } } }),
+        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+      }),
+      200,
+    )
+    const inheritedPlayback = await f.playback(game.id)
+    assert.deepEqual(inheritedPlayback.gameCorePreference, { override: null, platformCore: 'quicknes' })
+    await expectStatus(f.setCore(game.id, 'nestopia'), 200)
+    const reselectedPlayback = await f.playback(game.id)
+    assert.equal(reselectedPlayback.state?.id, 'nestopia-state')
+    await f.library
+      .update(romCorePreferenceTable)
+      .set({ core: 'mgba' })
+      .where(eq(romCorePreferenceTable.userId, 'alice'))
+    const stale = await f.playback(game.id)
+    assert.equal(stale.core, 'quicknes')
+    assert.equal(stale.gameCorePreference?.override, null)
+    assert.equal(stale.state, undefined)
+    const bobPlayback = await f.playback(game.id, 'bob')
+    assert.equal(bobPlayback.gameCorePreference?.override, 'quicknes')
+    const states = await expectStatus(f.request(`/roms/${game.id}/states`), 200)
+    assert.deepEqual(z.array(z.object({ id: z.string() })).parse(await states.json()), [
+      { id: 'nestopia-state' },
+      { id: 'fceumm-state' },
+    ])
+    assert.deepEqual(await sourceSnapshot(f.roms), before)
+  })
+
+  await it('rejects choices for hidden, unavailable, single-core and unsupported mounted games', async (t) => {
+    const f = await fixture(t, {
+      'roms/nes/Hidden.nes': 'hidden',
+      'roms/nes/Missing.nes': 'removed',
+      'roms/nes/Playable.nes': 'playable',
+      'roms/nes/Unsupported.iso': 'unsupported format on a multi-core platform',
+      'roms/psx/Single.chd': 'single core',
+    })
+    const { roms } = await f.list()
+    const hidden = roms.find((rom) => rom.fileName === 'Hidden.nes')
+    const missing = roms.find((rom) => rom.fileName === 'Missing.nes')
+    const playable = roms.find((rom) => rom.fileName === 'Playable.nes')
+    const unsupported = roms.find((rom) => rom.fileName === 'Unsupported.iso')
+    const single = roms.find((rom) => rom.fileName === 'Single.chd')
+    assert.ok(hidden && missing && playable && unsupported && single)
+    await expectStatus(f.setCore(playable.id, '__proto__'), 400)
+    await expectStatus(f.setCore(playable.id, 'mgba'), 422)
+    const anonymous = await f.setCore(playable.id, 'nestopia', '')
+    assert.equal(anonymous.ok, false)
+    await expectStatus(f.setCore(unsupported.id, 'nestopia'), 422)
+    await expectStatus(f.setCore(single.id, 'pcsx_rearmed'), 422)
+    const unsupportedPlayback = await f.playback(unsupported.id)
+    const singlePlayback = await f.playback(single.id)
+    assert.equal(unsupportedPlayback.gameCorePreference, null)
+    assert.equal(singlePlayback.gameCorePreference, null)
+
+    await expectStatus(f.request(`/roms/${hidden.id}`, { method: 'DELETE' }), 200)
+    await rm(path.join(f.roms, 'nes/Missing.nes'))
+    await f.mounted.scan()
+    await expectStatus(f.setCore(hidden.id, 'nestopia'), 404)
+    await expectStatus(f.setCore(missing.id, 'nestopia'), 404)
+    assert.deepEqual(await f.library.select().from(romCorePreferenceTable), [])
   })
 
   await it('edits metadata/art and hides shared games without deleting or reimporting source files', async (t) => {
@@ -1027,6 +1165,19 @@ await describe('mounted shared library', async () => {
     await expectStatus(f.request(`/roms/${ownRom.id}/content`, {}, 'bob'), 404)
     await expectStatus(f.request(`/files/${encodeURIComponent(ownRom.fileId)}`, {}, 'bob'), 404)
     await expectStatus(f.request(`/roms/${ownRom.id}`, { method: 'DELETE' }, 'bob'), 404)
+    await expectStatus(f.setCore(ownRom.id, 'nestopia', 'bob'), 404)
+    await expectStatus(f.setCore(ownRom.id, 'nestopia'), 200)
+    const ownedPlayback = await f.playback(ownRom.id)
+    assert.equal(ownedPlayback.core, 'nestopia')
+    await f.library.update(userTable).set({ libraryMode: libraryModeEnum.shared }).where(eq(userTable.id, 'bob'))
+    process.env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY = 'true'
+    process.env.RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY = 'false'
+    await expectStatus(f.setCore(ownRom.id, 'quicknes', 'bob'), 200)
+    const [guestPlayback, ownerPlayback] = await Promise.all([f.playback(ownRom.id, 'bob'), f.playback(ownRom.id)])
+    assert.equal(guestPlayback.core, 'quicknes')
+    assert.equal(ownerPlayback.core, 'nestopia')
+    await f.library.update(userTable).set({ libraryMode: libraryModeEnum.isolated }).where(eq(userTable.id, 'bob'))
+    process.env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY = 'false'
     const favorite = await f.request(
       '/favorites',
       {

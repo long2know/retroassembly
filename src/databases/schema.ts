@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import type { CoreName } from '#@/constants/core.ts'
 import type { MountedSource } from '#@/constants/mounted-library.ts'
 import type { PlatformName } from '#@/constants/platform.ts'
 import type { PreferenceSnippet } from '../constants/preference.ts'
@@ -167,6 +168,17 @@ export const userPreferenceTable = sqliteTable(
     ...baseSchema,
   },
   (table) => [index('idx_user_preferences').on(table.userId)],
+)
+
+export const romCorePreferenceTable = sqliteTable(
+  'rom_core_preferences',
+  {
+    core: text().notNull().$type<CoreName>(),
+    romId: text().notNull(),
+    userId: text().notNull(),
+    ...baseSchema,
+  },
+  (table) => [uniqueIndex('idx_rom_core_preferences_user_rom').on(table.userId, table.romId)],
 )
 
 export const favoriteTable = sqliteTable(

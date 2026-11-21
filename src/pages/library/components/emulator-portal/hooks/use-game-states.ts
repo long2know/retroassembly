@@ -3,7 +3,6 @@ import useSWRImmutable from 'swr/immutable'
 import useSWRMutation from 'swr/mutation'
 import { client, parseResponse } from '#@/api/client.ts'
 import { useShowGameOverlayContent } from '#@/pages/library/atoms.ts'
-import { useRom } from '#@/pages/library/hooks/use-rom.ts'
 import { useEmulator } from './use-emulator.ts'
 
 const { $get, $post } = client.states
@@ -62,8 +61,7 @@ async function forceGetEmulatorThumbnail(emulator: Nostalgist, resolution: { wid
 }
 
 export function useGameStates() {
-  const rom = useRom()
-  const { core, emulator } = useEmulator()
+  const { core, emulator, romId } = useEmulator()
   const [showGameOverlay] = useShowGameOverlayContent()
 
   const {
@@ -71,12 +69,12 @@ export function useGameStates() {
     isLoading: isStatesLoading,
     mutate: reloadStates,
   } = useSWRImmutable(
-    rom ? { endpoint: '/api/v1/roms/:id/states', query: { rom: rom.id, type: 'manual' } as const } : false,
+    romId ? { endpoint: '/api/v1/roms/:id/states', query: { rom: romId, type: 'manual' } as const } : false,
     ({ query }) => parseResponse($get({ query })),
   )
 
   const { data: autoStates, mutate: reloadAutoStates } = useSWRImmutable(
-    rom ? { endpoint: '/api/v1/roms/:id/states', query: { rom: rom.id, type: 'auto' } as const } : false,
+    romId ? { endpoint: '/api/v1/roms/:id/states', query: { rom: romId, type: 'auto' } as const } : false,
     ({ query }) => parseResponse($get({ query })),
     { dedupingInterval: 0, revalidateOnMount: true },
   )
@@ -86,7 +84,7 @@ export function useGameStates() {
   const { isMutating: isSavingManualState, trigger: saveManualState } = useSWRMutation(
     '/api/v1/states',
     async (_key, { arg = {} }: { arg?: { state?: File; thumbnail?: File } }) => {
-      if (!emulator || !core || !rom) {
+      if (!emulator || !core || !romId) {
         throw new Error('invalid emulator or core or rom')
       }
       const result = await getStateAndThumbnail(emulator, arg)
@@ -95,13 +93,13 @@ export function useGameStates() {
       if (core === 'mupen64plus_next') {
         thumbnail = await forceGetEmulatorThumbnail(emulator, { height: 3, width: 4 })
       }
-      await $post({ form: { core, rom: rom.id, state, thumbnail, type: 'manual' } })
+      await $post({ form: { core, rom: romId, state, thumbnail, type: 'manual' } })
       await Promise.all([reloadStates(), reloadAutoStates()])
     },
   )
 
   const { isMutating: isSavingAutoState, trigger: saveAutoState } = useSWRMutation('/api/v1/states', async () => {
-    if (!emulator || !core || !rom) {
+    if (!emulator || !core || !romId) {
       throw new Error('invalid emulator or core or rom')
     }
     const result = await emulator.saveState()
@@ -112,7 +110,7 @@ export function useGameStates() {
     }
     await $post({
       // @ts-expect-error actually we can use Blob here thought it says only File is accepted
-      form: { core, rom: rom.id, state, thumbnail, type: 'auto' },
+      form: { core, rom: romId, state, thumbnail, type: 'auto' },
     })
     await reloadAutoStates()
   })

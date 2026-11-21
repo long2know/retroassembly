@@ -40,3 +40,7 @@ export const coreDisplayNameMap = Object.fromEntries(
 )
 
 export type CoreName = keyof typeof cores
+
+export function isCoreName(value: unknown): value is CoreName {
+  return typeof value === 'string' && Object.hasOwn(cores, value)
+}

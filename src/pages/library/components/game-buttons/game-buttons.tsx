@@ -1,18 +1,21 @@
 import { Button, Callout, HoverCard } from '@radix-ui/themes'
 import { clsx } from 'clsx'
-import type { MouseEvent } from 'react'
+import { type MouseEvent, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useLoaderData } from 'react-router'
+import { useRevalidator } from 'react-router'
 import { platformMap } from '#@/constants/platform.ts'
+import type { GameCorePreference } from '#@/controllers/preference/rom-core-preference.ts'
 import { useLaunchButton } from '#@/pages/library/atoms.ts'
 import { useEmulator } from '#@/pages/library/components/emulator-portal/hooks/use-emulator.ts'
 import { useFocusIndicator } from '#@/pages/library/hooks/use-focus-indicator.ts'
 import { usePreference } from '#@/pages/library/hooks/use-preference.ts'
+import { useRom } from '#@/pages/library/hooks/use-rom.ts'
 import { getFileUrl } from '#@/pages/library/utils/file.ts'
 import { LaunchButton } from '../../platform/rom/components/launch-button.tsx'
 import { EmulatorPortal } from '../emulator-portal/emulator-portal.tsx'
 import { EmulatorSessionProvider } from '../emulator-portal/emulator-session-provider.tsx'
 import { BioseMissingMessage } from './biose-missing-message.tsx'
+import { GameCoreSelect } from './game-core-select.tsx'
 
 const isAppleMobile = /iphone|ipad|ipod/iu.test(navigator.userAgent)
 const isChromeLike = /chrome/iu.test(navigator.userAgent)
@@ -21,9 +24,10 @@ const isAppleMobileDesktopMode =
   !isChromeLike && isMacLike && /safari/iu.test(navigator.userAgent) && screen.height <= 1366
 const mayNeedsUserInteraction = isAppleMobile || isAppleMobileDesktopMode
 
-export function GameButtons() {
-  const { rom } = useLoaderData()
+export function GameButtons({ gameCorePreference }: Readonly<{ gameCorePreference?: GameCorePreference | null }>) {
+  const rom = useRom()
   const { t } = useTranslation()
+  const [isChangingCore, setIsChangingCore] = useState(false)
 
   const platformName = t(platformMap[rom.platform].displayNameI18nKey)
 
@@ -41,7 +45,18 @@ export function GameButtons() {
   return (
     <EmulatorSessionProvider>
       <div>
-        <GameButtonsContent />
+        <GameButtonsContent isChangingCore={isChangingCore} />
+        {gameCorePreference ? (
+          <div className='mt-3'>
+            <GameCoreSelect
+              gameCorePreference={gameCorePreference}
+              isPending={isChangingCore}
+              key={rom.id}
+              rom={rom}
+              setIsPending={setIsChangingCore}
+            />
+          </div>
+        ) : null}
         {['psx', 'n64'].includes(rom.platform) ? (
           <div className='mt-1 text-sm opacity-60'>
             {t('platform.emulationExperimental', { platform: platformName })}
@@ -52,13 +67,15 @@ export function GameButtons() {
   )
 }
 
-function GameButtonsContent() {
-  const { rom, state } = useLoaderData()
+function GameButtonsContent({ isChangingCore }: Readonly<{ isChangingCore: boolean }>) {
+  const rom = useRom()
   const { t } = useTranslation()
-  const { error, isPreparing, launch, prepare } = useEmulator()
+  const { state: revalidationState } = useRevalidator()
+  const { error, isPreparing, launch, prepare, resumeState: state } = useEmulator()
   const [, setLaunchButton] = useLaunchButton()
   const { syncStyle } = useFocusIndicator()
   const { preference } = usePreference()
+  const isPending = isPreparing || isChangingCore || revalidationState !== 'idle'
 
   const { bioses } = preference.emulator.platform[rom.platform]
 
@@ -77,7 +94,7 @@ function GameButtonsContent() {
   }
 
   async function handleClickContinue(event: MouseEvent<HTMLButtonElement>) {
-    if (isPreparing || (mayNeedsUserInteraction && !event?.clientX && !event?.clientY)) {
+    if (isPending || (mayNeedsUserInteraction && !event?.clientX && !event?.clientY)) {
       event.preventDefault()
       event.stopPropagation()
       return
@@ -88,7 +105,7 @@ function GameButtonsContent() {
   }
 
   async function handleClickStart(event: MouseEvent<HTMLButtonElement>) {
-    if (isPreparing || (mayNeedsUserInteraction && !event?.clientX && !event?.clientY)) {
+    if (isPending || (mayNeedsUserInteraction && !event?.clientX && !event?.clientY)) {
       event.preventDefault()
       event.stopPropagation()
       return
@@ -98,7 +115,7 @@ function GameButtonsContent() {
   }
 
   async function handleClickRetry() {
-    if (!isPreparing) {
+    if (!isPending) {
       await prepare()
     }
   }
@@ -107,7 +124,7 @@ function GameButtonsContent() {
     return <BioseMissingMessage bioses={missingBioses} />
   }
 
-  if (!isPreparing && error) {
+  if (!isPending && error) {
     return (
       <div className='flex h-16 w-full items-center justify-center gap-2 rounded bg-(--accent-3) lg:w-80'>
         <span className='icon-[mdi--warning-decagram]' />
@@ -123,11 +140,11 @@ function GameButtonsContent() {
   return (
     <div className='flex w-full flex-col gap-4 xl:flex-row'>
       {state ? (
-        <LaunchButton disabled={isPreparing} onClick={handleClickContinue}>
+        <LaunchButton disabled={isPending} onClick={handleClickContinue}>
           <span
             className={clsx(
               'absolute left-10',
-              isPreparing
+              isPending
                 ? 'icon-[svg-spinners--180-ring]'
                 : [
                     'size-6',
@@ -155,11 +172,11 @@ function GameButtonsContent() {
         </LaunchButton>
       ) : null}
 
-      <LaunchButton disabled={isPreparing} onClick={handleClickStart} variant={state ? 'outline' : 'solid'}>
+      <LaunchButton disabled={isPending} onClick={handleClickStart} variant={state ? 'outline' : 'solid'}>
         <span
           className={clsx(
             'absolute left-10',
-            isPreparing
+            isPending
               ? 'icon-[svg-spinners--180-ring]'
               : ['size-6', mayNeedsUserInteraction ? 'icon-[mdi--gesture-touch]' : 'icon-[mdi--play]'],
           )}

@@ -5,6 +5,7 @@ import fs from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
 import { Uint8ArrayReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js'
+import { createSyntheticNesRom } from './fixtures/synthetic-nes.ts'
 
 const project = process.cwd()
 const image = process.env.RETROASSEMBLY_MOUNTED_TEST_IMAGE || 'ghcr.io/long2know/retroassembly:latest'
@@ -77,22 +78,6 @@ function attemptSourceWrites() {
   )
 }
 
-function createHomebrew() {
-  const header = Buffer.from([0x4e, 0x45, 0x53, 0x1a, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-  const prg = Buffer.alloc(16 * 1024, 0xea)
-  // Original NROM program: cycle the universal background palette once per vblank.
-  const program = [
-    0x78, 0xd8, 0xa2, 0xff, 0x9a, 0xe8, 0x8e, 0x00, 0x20, 0x8e, 0x01, 0x20, 0x86, 0x00, 0x2c, 0x02, 0x20, 0x10, 0xfb,
-    0xa9, 0x3f, 0x8d, 0x06, 0x20, 0xa9, 0x00, 0x8d, 0x06, 0x20, 0xa5, 0x00, 0x29, 0x3f, 0x8d, 0x07, 0x20, 0xe6, 0x00,
-    0xa9, 0x00, 0x8d, 0x06, 0x20, 0x8d, 0x06, 0x20, 0x2c, 0x02, 0x20, 0x30, 0xfb, 0x4c, 0x0e, 0x80,
-  ]
-  prg.set(program)
-  for (const vector of [0x3f_fa, 0x3f_fc, 0x3f_fe]) {
-    prg.writeUInt16LE(0x80_00, vector)
-  }
-  return Buffer.concat([header, prg, Buffer.alloc(8 * 1024)])
-}
-
 async function snapshot(directory: string) {
   const entries: Record<string, unknown>[] = []
   async function visit(relative: string) {
@@ -143,7 +128,7 @@ try {
   for (const directory of [fixtures, romRoot, path.dirname(romDirectory), romDirectory, biosRoot]) {
     await fs.chmod(directory, 0o777)
   }
-  const rom = createHomebrew()
+  const rom = createSyntheticNesRom()
   const zipContent = Buffer.from(rom)
   zipContent[zipContent.length - 1] = 1
   const romMd5 = createHash('md5').update(rom).digest('hex')

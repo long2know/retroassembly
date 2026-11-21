@@ -1,10 +1,12 @@
 import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { isCoreName, type CoreName } from '#@/constants/core.ts'
 import { isPlatformName, type PlatformName } from '#@/constants/platform.ts'
 import { addBIOS } from '#@/controllers/preference/add-bios.ts'
 import { deleteBIOS } from '#@/controllers/preference/delete-bios.ts'
 import { getPreference } from '#@/controllers/preference/get-preference.ts'
+import { updateRomCorePreference } from '#@/controllers/preference/rom-core-preference.ts'
 import { updatePreference } from '#@/controllers/preference/update-preference.ts'
 
 export const preference = new Hono()
@@ -22,6 +24,15 @@ export const preference = new Hono()
       const preference = await c.req.json()
       const result = await updatePreference(preference)
       return c.json(result)
+    },
+  )
+
+  .put(
+    'roms/:id/core',
+    zValidator('json', z.object({ core: z.custom<CoreName>(isCoreName).nullable() })),
+    async (c) => {
+      const { core } = c.req.valid('json')
+      return c.json(await updateRomCorePreference(c.req.param('id'), core))
     },
   )
 
