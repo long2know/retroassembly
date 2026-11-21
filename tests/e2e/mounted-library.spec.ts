@@ -4,6 +4,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { MountedLibraryStatus, MountedSource } from '../../src/constants/mounted-library.ts'
+import { syntheticNesRomCount } from './fixtures/synthetic-nes.ts'
 import { syntheticPsxRomCount } from './fixtures/synthetic-psx.ts'
 
 interface Rom {
@@ -253,11 +254,11 @@ test('mounted sources remain immutable through content matching, settings, brows
       },
       { timeout: 30_000 },
     )
-    .toBe(2 + syntheticPsxRomCount)
+    .toBe(syntheticNesRomCount + syntheticPsxRomCount)
   const firstScan = await page.request.post(appPath('/api/v1/mounted-library'))
   expect(firstScan.status()).toBe(200)
   const firstStatus = await page.request.get(appPath('/api/v1/mounted-library'))
-  expect(await firstStatus.json()).toMatchObject({ indexed: 2 + syntheticPsxRomCount })
+  expect(await firstStatus.json()).toMatchObject({ indexed: syntheticNesRomCount + syntheticPsxRomCount })
 
   async function findRom() {
     const response = await page.request.get(appPath('/api/v1/roms/search?query=Immutable%20Pulse'))
@@ -453,7 +454,7 @@ test('mounted sources remain immutable through content matching, settings, brows
   const settings = await openSettings()
   await settings.getByRole('tab', { exact: true, name: 'Library' }).click()
   const beforeSettingsWrites = preferenceWrites
-  await expect(settings.getByTestId('platform-count-nes')).toHaveText('Indexed: 2')
+  await expect(settings.getByTestId('platform-count-nes')).toHaveText(`Indexed: ${syntheticNesRomCount}`)
   await expect(settings.getByRole('checkbox', { exact: true, name: 'NES' })).not.toBeChecked()
   const hideEmpty = settings.getByRole('checkbox', { exact: true, name: 'Hide empty platforms' })
   await hideEmpty.check()
@@ -480,7 +481,7 @@ test('mounted sources remain immutable through content matching, settings, brows
       return platform.platform === 'nes'
     }),
   ).toEqual({
-    indexed: 2,
+    indexed: syntheticNesRomCount,
     platform: 'nes',
     unsupported: 0,
   })
@@ -600,7 +601,7 @@ test('mounted sources remain immutable through content matching, settings, brows
   await metadataIdle()
   expect(providerMatches(provider)).toBe(beforeExplicitScanMatches)
   const scanStatus = await mountedStatus()
-  expect(scanStatus.indexed).toBe(2 + syntheticPsxRomCount)
+  expect(scanStatus.indexed).toBe(syntheticNesRomCount + syntheticPsxRomCount)
   expect(await identificationCache()).toEqual(initialIdentification)
   expect(await findRom()).toMatchObject({
     gameBoxartFileIds: coverFileId,
@@ -622,7 +623,7 @@ test('mounted sources remain immutable through content matching, settings, brows
       await expect(game).toHaveCount(0)
       const rescan = await page.request.post(appPath('/api/v1/mounted-library'))
       expect(rescan.status(), await rescan.text()).toBe(200)
-      expect(await rescan.json()).toMatchObject({ indexed: 1 + syntheticPsxRomCount })
+      expect(await rescan.json()).toMatchObject({ indexed: syntheticNesRomCount - 1 + syntheticPsxRomCount })
 
       const visitor = await browser.newContext({ baseURL: deployment.origin })
       const hiddenPath = appPath('/api/v1/mounted-library/hidden')
@@ -665,7 +666,7 @@ test('mounted sources remain immutable through content matching, settings, brows
         expect(restored.status(), await restored.text()).toBe(200)
         expect(await restored.json()).toEqual({ id: rom.id })
         await expect(hiddenGames.getByText('No mounted games are hidden.')).toBeVisible()
-        await expect(librarySettings.getByTestId('platform-count-nes')).toHaveText('Indexed: 2')
+        await expect(librarySettings.getByTestId('platform-count-nes')).toHaveText(`Indexed: ${syntheticNesRomCount}`)
         await librarySettings.getByTitle('Close', { exact: true }).click()
         await expect(game).toBeVisible()
         await visitorPage.reload()

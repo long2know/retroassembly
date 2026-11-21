@@ -19,6 +19,10 @@ const authMiddleware = createMiddleware(async (c, next) => {
 
 export const app = new Hono()
   .route('collections', collections)
+  .use('/roms/:id/in-game-save', async (c, next) => {
+    c.header('Cache-Control', 'private, no-store')
+    await next()
+  })
   .use(authMiddleware)
   .route('favorites', favorites)
   .route('files', files)

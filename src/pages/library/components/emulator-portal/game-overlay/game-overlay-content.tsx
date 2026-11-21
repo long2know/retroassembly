@@ -14,6 +14,7 @@ import { GameDiscs } from './game-discs.tsx'
 import { GameInputMessage } from './game-input-message.tsx'
 import { GameOverlayButtons } from './game-overlay-buttons.tsx'
 import { GameStates } from './game-states.tsx'
+import { InGameSaveControls } from './in-game-save-controls.tsx'
 
 function handleAnimationComplete(animation) {
   if (animation.opacity === 1) {
@@ -70,6 +71,7 @@ export function GameOverlayContent() {
             <div className='game-overlay-buttons flex flex-col gap-5 lg:flex-row'>
               <GameOverlayButtons />
             </div>
+            <InGameSaveControls />
             {playlistPlayback ? <GameDiscs playback={playlistPlayback} /> : null}
             {isDemo ? null : <GameStates />}
           </div>

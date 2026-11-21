@@ -6,8 +6,9 @@ import { useGameStates } from './use-game-states.ts'
 
 export function useGameOverlay() {
   const [visible, setVisible] = useShowGameOverlayContent()
-  const [isPending, setIsPending] = useIsGameOverlayPendingAtom()
-  const { emulator, playlistPlayback } = useEmulator()
+  const [isOverlayPending, setIsPending] = useIsGameOverlayPendingAtom()
+  const { emulator, inGameSave, playlistPlayback } = useEmulator()
+  const isPending = isOverlayPending || inGameSave?.phase === 'syncing'
   const { reloadStates } = useGameStates()
 
   async function show() {

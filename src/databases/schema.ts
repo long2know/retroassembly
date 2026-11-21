@@ -144,6 +144,19 @@ export const stateTable = sqliteTable(
   ],
 )
 
+export const inGameSaveTable = sqliteTable(
+  'in_game_saves',
+  {
+    core: text().notNull(),
+    data: text().notNull(),
+    romId: text().notNull(),
+    source: text().notNull(),
+    userId: text().notNull(),
+    version: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.romId, table.core, table.source] })],
+)
+
 export const launchRecordTable = sqliteTable(
   'launch_records',
   {

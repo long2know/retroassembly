@@ -8,6 +8,7 @@ export default defineConfig({
   testMatch: [
     'mounted-library.spec.ts',
     'mounted-psx-playlist.spec.ts',
+    'nes-in-game-save-sync.spec.ts',
     'per-game-emulator.spec.ts',
     'private-game-collections.spec.ts',
   ],

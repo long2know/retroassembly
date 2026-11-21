@@ -25,10 +25,12 @@ import { contextStorage } from 'hono/context-storage'
 import { matchRoutes } from 'react-router'
 import { z } from 'zod'
 import { app as api } from '#@/api/app.ts'
+import { inGameSaveAccountHeader, inGameSaveSize } from '#@/constants/in-game-save.ts'
 import { getMountedFormat, mountedPlaylistMaxBytes, resolveMountedPlatform } from '#@/constants/mounted-library.ts'
 import { getRomPlayback } from '#@/controllers/preference/rom-core-preference.ts'
 import {
   favoriteTable,
+  inGameSaveTable,
   launchRecordTable,
   libraryModeEnum,
   romCorePreferenceTable,
@@ -58,6 +60,7 @@ import { cacheMountedCover, enrichMountedRom, getMountedCoverUrl } from '#@/util
 import { requireRom } from '#@/utils/server/rom-access.ts'
 import { createFilesystemStorage, createStorage } from '#@/utils/server/storage.ts'
 import { createSupabase } from '#@/utils/server/supabase.ts'
+import { createSyntheticBatteryNesRom, createSyntheticNesRom } from '../e2e/fixtures/synthetic-nes.ts'
 
 const playlistBinding = z.object({ disc: z.number(), revision: z.string() })
 const playlistResponse = z.object({
@@ -271,6 +274,9 @@ async function fixture(t: TestContext, files: Record<string, string | Uint8Array
     const headers = new Headers(init?.headers)
     if (user) {
       headers.set('Authorization', `Bearer fixture-${user}`)
+      if (url.includes('/in-game-save?') && !headers.has(inGameSaveAccountHeader)) {
+        headers.set(inGameSaveAccountHeader, user)
+      }
     }
     return await app.request(`/api/v1${url}`, { ...init, headers })
   }
@@ -319,6 +325,30 @@ const mountedStatusResponse = z.object({
   unsupported: z.number(),
 })
 
+function inGameSaveUrl(
+  rom: { id: string; mountedSource?: { revision: string } | null },
+  bytes: Uint8Array,
+  core = 'fceumm',
+) {
+  const digest = createHash('sha256').update(bytes).digest('hex')
+  const query = new URLSearchParams({ core, romDigest: digest })
+  if (rom.mountedSource) {
+    query.set('revision', rom.mountedSource.revision)
+  }
+  return `/roms/${rom.id}/in-game-save?${query}`
+}
+
+function putSave(data: string, version: string | null): RequestInit {
+  return { body: JSON.stringify({ data, version }), headers: { 'Content-Type': 'application/json' }, method: 'PUT' }
+}
+
+async function savedJson(pending: Promise<Response>): Promise<unknown> {
+  const response = await expectStatus(pending, 200)
+  return await response.json()
+}
+
+const syncedVersion = z.object({ version: z.uuidv4() })
+
 async function createSyntheticZip(files: Record<string, string | Uint8Array>) {
   const writer = new ZipWriter(new Uint8ArrayWriter(), { useWebWorkers: false })
   for (const [filename, value] of Object.entries(files)) {
@@ -355,6 +385,170 @@ async function finishMetadataJob(mounted: ReturnType<typeof createMountedLibrary
 }
 
 await describe('mounted shared library', async () => {
+  await it('stores cartridge RAM privately with atomic creation and update preconditions', async (t) => {
+    const filename = 'Battery.nes'
+    const bytes = createSyntheticBatteryNesRom()
+    const f = await fixture(t, { [`roms/nes/${filename}`]: bytes })
+    const {
+      roms: [rom],
+    } = await f.list()
+    assert.equal(rom.fileName, filename)
+    const url = inGameSaveUrl(rom, bytes)
+    const blank = await expectStatus(f.request(url), 200)
+    assert.equal(blank.headers.get('Cache-Control'), 'private, no-store')
+    assert.deepEqual(await blank.json(), { data: null, version: null })
+    const payloads = [0x12, 0x34, 0x56, 0x78].map((byte) => Buffer.alloc(inGameSaveSize, byte).toString('base64'))
+
+    async function race(first: string, second: string, version: string | null) {
+      const contenders = [first, second]
+      const responses = await Promise.all(contenders.map((data) => f.request(url, putSave(data, version))))
+      assert.deepEqual(
+        responses.map((response) => response.status).toSorted((a, b) => a - b),
+        [200, 409],
+      )
+      assert.ok(responses.every((response) => response.headers.get('Cache-Control') === 'private, no-store'))
+      const winner = responses.findIndex((response) => response.ok)
+      const accepted = syncedVersion.parse(await responses[winner].json())
+      assert.notEqual(accepted.version, version)
+      assert.deepEqual(await savedJson(f.request(url)), {
+        data: contenders[winner],
+        version: accepted.version,
+      })
+      return { data: contenders[winner], version: accepted.version }
+    }
+
+    const first = await race(payloads[0], payloads[1], null)
+    const second = await race(payloads[2], payloads[3], first.version)
+    await expectStatus(f.request(url, putSave(first.data, first.version)), 409)
+    const changedAccount = putSave(first.data, null)
+    const headers = new Headers(changedAccount.headers)
+    headers.set(inGameSaveAccountHeader, 'alice')
+    await expectStatus(f.request(url, { headers }, 'bob'), 409)
+    await expectStatus(f.request(url, { ...changedAccount, headers }, 'bob'), 409)
+    assert.deepEqual(await savedJson(f.request(url, undefined, 'bob')), {
+      data: null,
+      version: null,
+    })
+    await expectStatus(f.request(url, putSave(first.data, second.version), 'bob'), 409)
+    await expectStatus(f.request(url, putSave(first.data, null), 'bob'), 200)
+    assert.deepEqual(await savedJson(f.request(url)), second)
+    assert.deepEqual(await savedJson(f.request(`/roms/${rom.id}/states`)), [])
+    const unauthorized = await expectStatus(f.request(url, undefined, ''), 400)
+    assert.equal(unauthorized.headers.get('Cache-Control'), 'private, no-store')
+  })
+
+  await it('rejects invalid payloads, hidden or revised mounts, and mismatched core selections', async (t) => {
+    const relative = 'roms/nes/Battery.nes'
+    const bytes = createSyntheticBatteryNesRom()
+    const plain = createSyntheticNesRom()
+    const f = await fixture(t, { [relative]: bytes, 'roms/nes/Plain.nes': plain })
+    const { roms } = await f.list()
+    const rom = roms.find(({ fileName }) => fileName === 'Battery.nes')
+    const noBattery = roms.find(({ fileName }) => fileName === 'Plain.nes')
+    assert.ok(rom && noBattery)
+    const url = inGameSaveUrl(rom, bytes)
+    const data = Buffer.alloc(inGameSaveSize, 0xa5).toString('base64')
+    await expectStatus(f.request(inGameSaveUrl(noBattery, plain), putSave(data, null)), 422)
+    await expectStatus(f.request(inGameSaveUrl(rom, bytes, 'nestopia')), 400)
+    await expectStatus(f.request(inGameSaveUrl({ id: rom.id }, bytes)), 409)
+    await expectStatus(f.request(`${url}&userId=bob`), 400)
+    await expectStatus(f.request(url.replace(/romDigest=.*/u, 'romDigest=invalid')), 400)
+    await expectStatus(f.request(url, putSave('abcd', null)), 400)
+    await expectStatus(f.request(url, putSave(data, 'not-a-version')), 400)
+    await expectStatus(
+      f.request(url, { ...putSave(data, null), body: JSON.stringify({ data, userId: 'bob', version: null }) }),
+      400,
+    )
+    for (const length of [undefined, '1']) {
+      const headers = new Headers({ 'Content-Type': 'application/json' })
+      if (length) {
+        headers.set('Content-Length', length)
+      }
+      await expectStatus(f.request(url, { ...putSave('A'.repeat(12_000), null), headers }), 413)
+    }
+    assert.deepEqual(await f.library.select().from(inGameSaveTable), [])
+    const { version } = syncedVersion.parse(await savedJson(f.request(url, putSave(data, null))))
+    await expectStatus(f.setCore(rom.id, 'nestopia'), 200)
+    await expectStatus(f.request(url), 409)
+    await expectStatus(f.request(url, putSave(data, version)), 409)
+    await expectStatus(f.setCore(rom.id, null), 200)
+    assert.deepEqual(await savedJson(f.request(url)), { data, version })
+
+    const changed = Buffer.from(bytes)
+    changed[1000] = 0x11
+    await writeFixture(f.root, relative, changed)
+    await expectStatus(f.request(url), 409)
+    await expectStatus(f.request(url, putSave(data, version)), 409)
+    await f.mounted.scan()
+    const updated = await f.list()
+    const updatedRom = updated.roms.find(({ id }) => id === rom.id)
+    assert.ok(updatedRom?.mountedSource && rom.mountedSource)
+    assert.notEqual(updatedRom.mountedSource.revision, rom.mountedSource.revision)
+    const newUrl = inGameSaveUrl(updatedRom, changed)
+    assert.deepEqual(await savedJson(f.request(newUrl)), { data: null, version: null })
+    await expectStatus(f.request(url), 409)
+    await expectStatus(f.request(inGameSaveUrl(rom, changed), putSave(data, null)), 409)
+    await expectStatus(f.request(newUrl, putSave(data, version)), 409)
+    await expectStatus(f.request(newUrl, putSave(data, null)), 200)
+    await expectStatus(f.request(`/roms/${rom.id}`, { method: 'DELETE' }), 200)
+    await expectStatus(f.request(newUrl), 404)
+    await expectStatus(f.request(newUrl, putSave(data, null)), 404)
+  })
+
+  await it('uses uploaded file contents even when the ROM ID and storage ID do not change', async (t) => {
+    const bytes = createSyntheticBatteryNesRom()
+    const fileId = 'roms/famicom/private.nes'
+    const f = await fixture(t, { [`data/storage/${fileId}`]: bytes })
+    process.env.RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY = 'false'
+    process.env.RETROASSEMBLY_RUN_TIME_MSLEUTH_HOST = ''
+    const romId = 'private-upload'
+    await f.library.insert(romTable).values({
+      fileId,
+      fileName: 'Private.nes',
+      id: romId,
+      platform: 'famicom',
+      userId: 'bob',
+    })
+    await f.library.update(userTable).set({ libraryMode: libraryModeEnum.isolated }).where(eq(userTable.id, 'bob'))
+    const url = inGameSaveUrl({ id: romId }, bytes)
+    const data = Buffer.alloc(inGameSaveSize, 0x7e).toString('base64')
+    await expectStatus(f.request(url), 404)
+    await expectStatus(f.request(url, putSave(data, null)), 404)
+    const saved = await expectStatus(f.request(url, putSave(data, null), 'bob'), 200)
+    const { version } = syncedVersion.parse(await saved.json())
+    assert.deepEqual(await savedJson(f.request(url, undefined, 'bob')), { data, version })
+
+    const altered = Buffer.from(bytes)
+    altered[12_000] = 0x11
+    await writeFixture(f.root, `data/storage/${fileId}`, altered)
+    await expectStatus(f.request(url, undefined, 'bob'), 409)
+    await expectStatus(f.request(url, putSave(data, version), 'bob'), 409)
+    const currentUrl = inGameSaveUrl({ id: romId }, altered)
+    assert.deepEqual(await savedJson(f.request(currentUrl, undefined, 'bob')), {
+      data: null,
+      version: null,
+    })
+
+    const replacement = Buffer.from(bytes)
+    replacement[1000] = 0x11
+    const form = new FormData()
+    form.set('file', new File([replacement], 'Private.nes'))
+    form.set('platform', 'famicom')
+    const replacedRom = z
+      .object({ fileId: z.string(), id: z.string() })
+      .parse(await savedJson(f.request('/roms', { body: form, method: 'POST' }, 'bob')))
+    assert.equal(replacedRom.id, romId)
+    assert.notEqual(replacedRom.fileId, fileId)
+    await expectStatus(f.request(currentUrl, undefined, 'bob'), 409)
+    const replaced = inGameSaveUrl({ id: romId }, replacement)
+    assert.deepEqual(await savedJson(f.request(replaced, undefined, 'bob')), {
+      data: null,
+      version: null,
+    })
+    await rm(path.join(f.storage, replacedRom.fileId))
+    await expectStatus(f.request(replaced, undefined, 'bob'), 404)
+  })
+
   await it('round-trips nested card URLs through the actual router without double encoding', () => {
     for (const fileName of ['Homebrew/Immutable Pulse.nes', 'Favorites/雪 & 100% #1?.NES']) {
       for (const isDemo of [false, true]) {

@@ -18,7 +18,9 @@ export function GameInputMessage() {
   const { activeEmulator } = useEmulatorSession()
   const rom = useRom()
   const rewindEnabled =
-    !activeEmulator?.playlistPlayback && (rom ? preference.emulator.platform[rom.platform].rewindEnabled : true)
+    !activeEmulator?.playlistPlayback &&
+    !activeEmulator?.inGameSave &&
+    (rom ? preference.emulator.platform[rom.platform].rewindEnabled : true)
 
   const messages: { keyNames: string[]; message: ReactNode }[] = connected
     ? [

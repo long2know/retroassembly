@@ -1,13 +1,24 @@
 import type { Nostalgist } from 'nostalgist'
-import { createContext, type ReactNode, useContext, useMemo, useReducer, useState } from 'react'
+import {
+  createContext,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+  useContext,
+  useMemo,
+  useReducer,
+  useState,
+} from 'react'
 import type { CoreName } from '#@/constants/core.ts'
 import type { MountedPlaylistState } from '#@/constants/mounted-library.ts'
 import { useGamepadMapping, type GamepadMapping } from '#@/pages/library/hooks/use-gamepad-mapping.ts'
+import type { InGameSaveSession } from '#@/pages/library/utils/in-game-save.ts'
 import type { PlaylistPlayback } from '#@/pages/library/utils/mounted-playlist.ts'
 
 interface PreparedEmulator {
   core: CoreName
   emulator: Nostalgist
+  inGameSave?: InGameSaveSession
   options: Parameters<typeof Nostalgist.prepare>[0]
   playlistPlayback?: PlaylistPlayback
   resumePlaylistState?: { state: MountedPlaylistState; url: string }
@@ -18,7 +29,7 @@ const EmulatorSessionContext = createContext<{
   activeEmulator: PreparedEmulator | null
   emulatorGamepadMapping: GamepadMapping
   playlistStartFailed: boolean
-  setActiveEmulator: (session: PreparedEmulator | null) => void
+  setActiveEmulator: Dispatch<SetStateAction<PreparedEmulator | null>>
   setPlaylistStartFailed: (failed: boolean) => void
 } | null>(null)
 

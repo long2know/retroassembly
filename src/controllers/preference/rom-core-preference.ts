@@ -22,7 +22,7 @@ function forUserAndRom(userId: string, romId: string) {
   return and(eq(romCorePreferenceTable.userId, userId), eq(romCorePreferenceTable.romId, romId))
 }
 
-export async function getRomPlayback(rom: CorePreferenceRom) {
+export async function getRomCore(rom: CorePreferenceRom) {
   const { currentUser, db, preference } = getContext().var
   const { cores } = platformMap[rom.platform]
   const configuredCore = preference.emulator.platform[rom.platform]?.core
@@ -38,6 +38,11 @@ export async function getRomPlayback(rom: CorePreferenceRom) {
     gameCorePreference = { override, platformCore }
   }
   const core = gameCorePreference?.override ?? platformCore
+  return { core, gameCorePreference }
+}
+
+export async function getRomPlayback(rom: CorePreferenceRom) {
+  const { core, gameCorePreference } = await getRomCore(rom)
   const playlist = rom.mountedSource?.playlist
   const [state] = rom.mountedSource?.unsupportedReason
     ? []

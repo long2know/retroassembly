@@ -22,8 +22,10 @@ import { getMountedLibrary } from '#@/utils/server/mounted-library-runtime.ts'
 import { nanoid } from '#@/utils/server/nanoid.ts'
 import { requireEditableRom, requireRom } from '#@/utils/server/rom-access.ts'
 import { createFileResponse } from '../utils.ts'
+import { inGameSave } from './in-game-save.ts'
 
 export const roms = new Hono()
+  .route(':id/in-game-save', inGameSave)
   .get('', async (c) => c.json(await getRoms()))
   .post(
     '',

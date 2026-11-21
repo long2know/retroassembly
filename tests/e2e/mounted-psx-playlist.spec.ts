@@ -103,6 +103,7 @@ test('switches real mounted PlayStation discs lazily and restores private disc-b
   async function pause() {
     await page.keyboard.press('Escape')
     await expect(choices).toBeVisible()
+    await expect(overlay.getByRole('button', { name: 'Sync in-game save' })).toHaveCount(0)
     await expect(overlay.getByRole('button', { exact: true, name: 'Resume' })).toBeFocused()
   }
   async function select(index: number) {
