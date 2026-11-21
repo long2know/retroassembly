@@ -5,7 +5,11 @@ import fs from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
 import { Uint8ArrayReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js'
-import { createSyntheticNesRom } from './fixtures/synthetic-nes.ts'
+import {
+  createSyntheticBatteryNesRom,
+  createSyntheticNesRom,
+  syntheticBatteryRomName,
+} from './fixtures/synthetic-nes.ts'
 import { writeSyntheticPsxMount } from './fixtures/synthetic-psx.ts'
 
 const project = process.cwd()
@@ -141,6 +145,7 @@ try {
   const bios = Buffer.from(Array.from({ length: 192 }, (_, index) => (index * 37) % 256))
   const romFile = path.join(romDirectory, 'Immutable Pulse.nes')
   await fs.writeFile(romFile, rom, { mode: 0o666 })
+  await fs.writeFile(path.join(romDirectory, syntheticBatteryRomName), createSyntheticBatteryNesRom(), { mode: 0o666 })
   await fs.writeFile(path.join(romDirectory, 'GoodTools Alias (U) [!].zip'), zipArchive, { mode: 0o666 })
   await fs.writeFile(path.join(biosRoot, 'nes.pal'), bios, { mode: 0o666 })
   await fs.writeFile(path.join(fixtures, 'outside.nes'), rom)

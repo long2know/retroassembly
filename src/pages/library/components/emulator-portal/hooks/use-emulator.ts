@@ -1,11 +1,12 @@
-import { attemptAsync, delay, noop } from 'es-toolkit'
+import { attempt, attemptAsync, delay, noop } from 'es-toolkit'
 import NoSleep from 'nosleep.js'
-import { Nostalgist } from 'nostalgist'
+import type { Nostalgist } from 'nostalgist'
 import { useEffect, useMemo } from 'react'
 import { useLoaderData, useRevalidator } from 'react-router'
 import useSWRImmutable from 'swr/immutable'
 import { client } from '#@/api/client.ts'
 import type { CoreName } from '#@/constants/core.ts'
+import { isInGameSaveCandidate } from '#@/constants/in-game-save.ts'
 import { isCompatiblePlaylistState } from '#@/constants/mounted-library.ts'
 import type { Rom } from '#@/controllers/roms/get-roms.ts'
 import type { State } from '#@/controllers/states/get-states.ts'
@@ -18,6 +19,13 @@ import {
 import { useIsDemo } from '#@/pages/library/hooks/use-demo.ts'
 import { useRom } from '#@/pages/library/hooks/use-rom.ts'
 import { getFileUrl } from '#@/pages/library/utils/file.ts'
+import {
+  type InGameSaveState,
+  preloadInGameSave,
+  prepareDirectGame,
+  readCartridgeRam,
+  syncInGameSave,
+} from '#@/pages/library/utils/in-game-save.ts'
 import { prepareMountedPlaylist } from '#@/pages/library/utils/mounted-playlist.ts'
 import { focus, offCancel, onCancel } from '#@/pages/library/utils/spatial-navigation.ts'
 import { getCDNUrl } from '#@/utils/isomorphic/cdn.ts'
@@ -46,7 +54,11 @@ let noSleep: NoSleep
 const originalGetUserMedia = globalThis.navigator?.mediaDevices?.getUserMedia?.bind(globalThis.navigator.mediaDevices)
 export function useEmulator() {
   const rom: Rom = useRom()
-  const { core: playbackCore, state } = useLoaderData<{ core?: CoreName; state?: State | null }>()
+  const {
+    core: playbackCore,
+    currentUser,
+    state,
+  } = useLoaderData<{ core?: CoreName; currentUser?: { id: string }; state?: State | null }>()
   const { preference } = usePreference()
   const { activeEmulator, emulatorGamepadMapping, playlistStartFailed, setActiveEmulator, setPlaylistStartFailed } =
     useEmulatorSession()
@@ -102,21 +114,27 @@ export function useEmulator() {
     [romObject, bios, core, preference, emulatorGamepadMapping, shader, playlist, resumeState?.fileId, rom.platform],
   )
   const options = activeEmulator?.options ?? playbackOptions
+  const accountId = currentUser?.id
+  const cartridge =
+    !isDemo && accountId && isInGameSaveCandidate(rom.platform, rom.fileName, core) ? romObject : undefined
 
   const {
     data: prepared,
     error,
     isValidating,
     mutate: prepare,
-  } = useSWRImmutable(rom.mountedSource?.unsupportedReason ? null : { options, playlist, romId }, async (key) =>
-    key.playlist
-      ? await prepareMountedPlaylist(key.options, key.romId, key.playlist)
-      : { emulator: await Nostalgist.prepare(key.options), playlistPlayback: undefined },
+  } = useSWRImmutable(
+    rom.mountedSource?.unsupportedReason ? null : { cartridge, options, playlist, romId },
+    async (key) =>
+      key.playlist
+        ? { ...(await prepareMountedPlaylist(key.options, key.romId, key.playlist)), digest: undefined }
+        : await prepareDirectGame(key.options, key.cartridge),
   )
 
   const emulator = activeEmulator?.emulator ?? prepared?.emulator
   const playlistPlayback = activeEmulator?.playlistPlayback ?? prepared?.playlistPlayback
   const isPreparing = !rom || isValidating
+  const inGameSave = activeEmulator?.inGameSave
 
   async function launch({ withState }: { withState?: boolean } = {}) {
     if (
@@ -148,7 +166,24 @@ export function useEmulator() {
         ? { state: resumeState.playlist, url: getFileUrl(resumeState.fileId) }
         : undefined
     setPlaylistStartFailed(false)
-    setActiveEmulator({ core, emulator, options, playlistPlayback, resumePlaylistState, romId })
+    setActiveEmulator({
+      core,
+      emulator,
+      inGameSave:
+        prepared?.digest && accountId
+          ? {
+              accountId,
+              controller: new AbortController(),
+              digest: prepared.digest,
+              revision: rom.mountedSource?.revision,
+              state: { phase: 'loading' },
+            }
+          : undefined,
+      options,
+      playlistPlayback,
+      resumePlaylistState,
+      romId,
+    })
     setLaunched(true)
 
     if (!isDemo && !playlistPlayback) {
@@ -157,7 +192,13 @@ export function useEmulator() {
   }
 
   async function start() {
-    if (!emulator || !rom) {
+    if (!emulator || !rom || emulator.getStatus() !== 'initial') {
+      return
+    }
+    const [saveError, version] = inGameSave
+      ? await attemptAsync(() => preloadInGameSave(emulator, inGameSave, romId))
+      : []
+    if (inGameSave?.controller.signal.aborted) {
       return
     }
     try {
@@ -177,6 +218,16 @@ export function useEmulator() {
       try {
         globalThis.navigator.mediaDevices.getUserMedia = originalGetUserMedia
       } catch {}
+    }
+    if (inGameSave) {
+      const [ramError, ram] = attempt(() => readCartridgeRam(emulator))
+      if (ramError || (ram && saveError)) {
+        setInGameSaveState({ phase: 'unavailable' })
+      } else if (ram) {
+        setInGameSaveState({ phase: version ? 'loaded' : 'ready', version: version ?? null })
+      } else {
+        setInGameSaveState({ phase: 'unsupported' })
+      }
     }
     const canvas = emulator.getCanvas()
     if (canvas) {
@@ -209,7 +260,11 @@ export function useEmulator() {
 
   async function exit({ reloadAfterExit = false } = {}) {
     const status = emulator?.getStatus() || ''
-    if (['paused', 'running'].includes(status) || (status === 'initial' && activeEmulator?.playlistPlayback)) {
+    if (
+      ['paused', 'running'].includes(status) ||
+      (status === 'initial' && (activeEmulator?.playlistPlayback || inGameSave))
+    ) {
+      inGameSave?.controller.abort()
       playlistPlayback?.close()
       emulator?.exit()
       setLaunched(false)
@@ -218,6 +273,7 @@ export function useEmulator() {
       if (document.fullscreenElement) {
         promises.push(document.exitFullscreen())
       }
+
       await attemptAsync(() => Promise.all(promises))
       setSpatialNavigationPaused(false)
       setIsFullscreen(false)
@@ -228,6 +284,31 @@ export function useEmulator() {
       if (reloadAfterExit) {
         await revalidate()
       }
+    }
+  }
+
+  function setInGameSaveState(state: InGameSaveState) {
+    setActiveEmulator((current) =>
+      current?.inGameSave && current.inGameSave.controller === inGameSave?.controller
+        ? { ...current, inGameSave: { ...current.inGameSave, state } }
+        : current,
+    )
+  }
+
+  async function syncCartridgeSave() {
+    if (
+      !inGameSave ||
+      emulator?.getStatus() !== 'paused' ||
+      !('version' in inGameSave.state) ||
+      inGameSave.state.phase === 'syncing'
+    ) {
+      return
+    }
+    const { version } = inGameSave.state
+    setInGameSaveState({ phase: 'syncing', version })
+    const [, state] = await attemptAsync(() => syncInGameSave(emulator, inGameSave, { romId, version }))
+    if (!inGameSave.controller.signal.aborted) {
+      setInGameSaveState(state ?? { phase: 'failed', version })
     }
   }
 
@@ -266,6 +347,7 @@ export function useEmulator() {
     emulator,
     error,
     exit,
+    inGameSave: inGameSave?.state,
     isFullscreen,
     isPreparing,
     launch,
@@ -279,6 +361,7 @@ export function useEmulator() {
     setLaunched,
     setPlaylistStartFailed,
     start,
+    syncCartridgeSave,
     toggleFullscreen,
   }
 }

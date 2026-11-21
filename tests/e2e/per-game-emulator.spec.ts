@@ -85,6 +85,8 @@ test('uses private per-game emulator choices for actual browser play and compati
 
   async function saveAndExit(core: string) {
     await page.keyboard.press('Escape')
+    await expect(page.getByRole('button', { exact: true, name: 'Save & Exit' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Sync in-game save' })).toHaveCount(0)
     const saved = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === appPath('/api/v1/states') && response.request().method() === 'POST',

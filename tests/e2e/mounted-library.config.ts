@@ -8,13 +8,17 @@ export default defineConfig({
   testMatch: [
     'mounted-library.spec.ts',
     'mounted-psx-playlist.spec.ts',
+    'nes-in-game-save-sync.spec.ts',
     'per-game-emulator.spec.ts',
     'private-game-collections.spec.ts',
   ],
   timeout: 240_000,
   use: {
     baseURL: process.env.RETROASSEMBLY_MOUNTED_TEST_URL,
-    channel: process.env.RETROASSEMBLY_MOUNTED_TEST_BROWSER || 'chrome',
+    channel:
+      process.env.RETROASSEMBLY_MOUNTED_TEST_BROWSER === 'chromium'
+        ? undefined
+        : process.env.RETROASSEMBLY_MOUNTED_TEST_BROWSER || 'chrome',
     headless: true,
     launchOptions: {
       args: ['--no-sandbox', '--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],

@@ -69,6 +69,32 @@ replacement. Existing savestates are not converted or guaranteed compatible with
 replacement ROM bytes. Reads detect unscanned replacements and return `409`
 until a rescan; unavailable/unsafe sources return `503`.
 
+### Sync in-game cartridge saves
+
+For a supported NES or Famicom game, save using the game's own save menu.
+Pause the game and select **Sync in-game save**. Wait for the confirmation
+before exiting. The next **Start** on the same account loads the latest
+compatible copy, including on another browser. **Save State**, **Continue**
+and **Save & Exit** still operate on snapshots; they do not sync a cartridge
+save. Closing the tab does not sync it either.
+
+This initial release supports standalone `.nes` files with a standard iNES
+MMC1 battery header and 8 KiB of SRAM, using FCEUmm. It works with both uploads
+and mounted files. It needs a secure browser context (HTTPS or localhost).
+Other mappers and cores, archives, disks, playlists and demos do not
+participate. For these compatible cartridges, RetroAssembly preserves the
+cartridge RAM when loading a snapshot and disables rewind and run-ahead so
+they cannot roll back the RAM.
+
+The copy lives in RetroAssembly's database, not beside the ROM. It is private
+to the signed-in account and tied to the game, core and exact ROM contents
+(plus the mounted revision where applicable). A new ROM revision does not
+load the old copy. If another session syncs first, the older session cannot
+overwrite it. Exit and choose **Start** to load the newer copy. If sync
+storage is unavailable on launch, gameplay can continue, but syncing is
+disabled for that session until you exit and start again. If you switch
+accounts in the browser, a game already running cannot sync to the new account.
+
 Authenticated API endpoints:
 
 - `GET /api/v1/roms` and `GET /api/v1/roms/:id`: visible games/details.
@@ -175,9 +201,10 @@ to the emulator that made them and are available when you switch back.
 Auto-save retention still applies per ROM, across all emulators.
 
 Before serving this version, self-hosted Workers deployments must apply any
-pending D1 migrations, including `0011_mounted_playlist_states.sql` and
-`0012_private_game_collections.sql`, to their library database. Existing saves
-are unchanged. Node applies migrations automatically at startup.
+pending D1 migrations, including `0011_mounted_playlist_states.sql`,
+`0012_private_game_collections.sql`, and `0013_in_game_saves.sql`, to their library
+database. Existing saves are unchanged. Node applies migrations automatically
+at startup.
 
 ## Private game collections
 

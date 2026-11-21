@@ -84,8 +84,13 @@ export function createFilesystemStorage(storageDirectory: string) {
       }
     },
 
-    async get(id: string) {
+    async get(id: string, { stream = false } = {}) {
       const filePath = await getPath(id)
+      if (stream) {
+        const { openAsBlob } = await import('node:fs')
+        const blob = await openAsBlob(filePath)
+        return { body: blob.stream(), httpEtag: `"${Date.now()}"`, size: blob.size }
+      }
       const { default: fs } = await import('fs-extra')
       const buffer = await fs.readFile(filePath)
       return { body: buffer, httpEtag: `"${Date.now()}"`, size: buffer.length }
@@ -103,7 +108,8 @@ export function createStorage() {
   const c = getContext()
   const { BUCKET } = env<Env>(c)
   const { storageDirectory } = getDirectories()
-  const managed = BUCKET || createFilesystemStorage(storageDirectory)
+  const filesystem = createFilesystemStorage(storageDirectory)
+  const managed = BUCKET || filesystem
 
   async function getMountedFile(id: string) {
     if (!isMountedLibraryEnabled() || !c.var.currentUser) {
@@ -132,12 +138,12 @@ export function createStorage() {
       await managed.put(id, file)
     },
 
-    async get(id: string) {
+    async get(id: string, options?: { stream?: boolean }) {
       if (isMountedFileId(id)) {
         return await getMountedFile(id)
       }
       assertManagedFileId(id)
-      return await managed.get(id)
+      return await (BUCKET ? BUCKET.get(id) : filesystem.get(id, options))
     },
 
     async delete(id: string) {

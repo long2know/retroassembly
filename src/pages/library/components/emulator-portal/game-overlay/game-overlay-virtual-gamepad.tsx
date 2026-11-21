@@ -85,7 +85,9 @@ export function GameOverlayVirtualGamepad() {
   const { preference } = usePreference()
   const { activeEmulator } = useEmulatorSession()
   const rewindEnabled =
-    !activeEmulator?.playlistPlayback && (rom ? preference.emulator.platform[rom.platform].rewindEnabled : true)
+    !activeEmulator?.playlistPlayback &&
+    !activeEmulator?.inGameSave &&
+    (rom ? preference.emulator.platform[rom.platform].rewindEnabled : true)
 
   if (!launched) {
     return
