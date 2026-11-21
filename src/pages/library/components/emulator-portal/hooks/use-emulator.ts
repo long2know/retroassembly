@@ -195,6 +195,10 @@ export function useEmulator() {
     if (!emulator || !rom || emulator.getStatus() !== 'initial') {
       return
     }
+    if (inGameSave && preference.emulator.fullscreen && !document.fullscreenElement) {
+      // The save request can outlast the launch gesture required for fullscreen.
+      await toggleFullscreen()
+    }
     const [saveError, version] = inGameSave
       ? await attemptAsync(() => preloadInGameSave(emulator, inGameSave, romId))
       : []
@@ -239,7 +243,7 @@ export function useEmulator() {
       focus('canvas')
     }
 
-    if (preference.emulator.fullscreen) {
+    if (preference.emulator.fullscreen && !inGameSave) {
       await toggleFullscreen()
     }
     onCancel(noop)

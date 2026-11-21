@@ -293,12 +293,36 @@ test('syncs actual battery RAM privately and keeps NES snapshots separate', asyn
     await controllerButton(fresh, 'z', 'green')
     await pause(fresh)
     await exit(fresh)
+    const fullscreenPreference = await fresh.request.post(appPath('/api/v1/preference'), {
+      data: { emulator: { fullscreen: true } },
+    })
+    expect(fullscreenPreference.ok(), await fullscreenPreference.text()).toBe(true)
+    await fresh.goto(detail)
+    const releaseRead = Promise.withResolvers<undefined>()
     await fresh.route(
       (url) => url.pathname === savePath,
-      (route) => route.fulfill({ json: { message: 'Fixture read unavailable' }, status: 503 }),
+      async (route) => {
+        await releaseRead.promise
+        await route.fulfill({ json: { message: 'Fixture read unavailable' }, status: 503 })
+      },
       { times: 1 },
     )
-    await start(fresh, 'red')
+    const pendingRead = fresh.waitForRequest(
+      (request) => new URL(request.url()).pathname === savePath && request.method() === 'GET',
+    )
+    const fullscreenStart = fresh.getByRole('button', { exact: true, name: 'Start' })
+    try {
+      await expect(fullscreenStart).toBeEnabled({ timeout: 90_000 })
+      await fullscreenStart.click()
+      await pendingRead
+      await expect
+        .poll(() => fresh.evaluate(() => document.fullscreenElement === document.body), { timeout: 3000 })
+        .toBe(true)
+    } finally {
+      releaseRead.resolve(undefined)
+    }
+    await expectColor(fresh, 'red')
+    expect(await fresh.evaluate(() => document.fullscreenElement === document.body)).toBe(true)
     await pause(fresh)
     await expect(overlay(fresh).getByRole('status')).toHaveText(
       'Could not load your in-game save. Exit and start again to retry.',

@@ -15,10 +15,7 @@ export default defineConfig({
   timeout: 240_000,
   use: {
     baseURL: process.env.RETROASSEMBLY_MOUNTED_TEST_URL,
-    channel:
-      process.env.RETROASSEMBLY_MOUNTED_TEST_BROWSER === 'chromium'
-        ? undefined
-        : process.env.RETROASSEMBLY_MOUNTED_TEST_BROWSER || 'chrome',
+    channel: process.env.RETROASSEMBLY_MOUNTED_TEST_BROWSER || 'chrome',
     headless: true,
     launchOptions: {
       args: ['--no-sandbox', '--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
