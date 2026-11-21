@@ -1,13 +1,13 @@
-import { Card, Select } from '@radix-ui/themes'
+import { Button, Card, Select } from '@radix-ui/themes'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useRevalidator } from 'react-router'
 import { coreDisplayNameMap, type CoreName, coreOptionsMap } from '#@/constants/core.ts'
 import { platformMap } from '#@/constants/platform.ts'
 import { usePlatform } from '#@/pages/library/hooks/use-platform.ts'
 import { usePreference } from '#@/pages/library/hooks/use-preference.ts'
 import { getPlatformIcon } from '#@/utils/client/library.ts'
 import { SettingsTitle } from '../settings-title.tsx'
-import { UpdateButton } from '../update-button.tsx'
 import { BIOSOptions } from './bios-options.tsx'
 import { CoreOptions } from './core-options.tsx'
 import { PlatformShaderSettings } from './platform-shader-settings.tsx'
@@ -16,6 +16,7 @@ import { RewindSettings } from './rewind-settings.tsx'
 export function CoresSettings() {
   const { t } = useTranslation()
   const { isLoading, preference, update } = usePreference()
+  const { revalidate, state } = useRevalidator()
   const currentPlatform = usePlatform()
   const [selectedPlatform, setSelectedPlatform] = useState(currentPlatform?.name || preference.ui.platforms?.[0])
 
@@ -26,10 +27,12 @@ export function CoresSettings() {
   const { core } = preference.emulator.platform[selectedPlatform]
   const coreOptions = coreOptionsMap[core] || []
   const showReset = platformMap[selectedPlatform].cores.length > 0 && coreOptions.length > 0
+  const isPending = isLoading || state !== 'idle'
 
-  async function handleValueChange(value: CoreName) {
+  async function updateCore(value: CoreName | null) {
     await update({
       emulator: {
+        core: value === null ? { [core]: null } : undefined,
         platform: {
           [selectedPlatform]: {
             core: value,
@@ -37,6 +40,11 @@ export function CoresSettings() {
         },
       },
     })
+    await revalidate()
+  }
+
+  async function handleValueChange(value: CoreName) {
+    await updateCore(value)
   }
 
   return (
@@ -50,7 +58,7 @@ export function CoresSettings() {
             size='3'
             value={selectedPlatform}
           >
-            <Select.Trigger disabled={isLoading} variant='ghost'>
+            <Select.Trigger disabled={isPending} variant='ghost'>
               <div className='flex items-center gap-2'>
                 <img
                   alt={t(platformMap[selectedPlatform].displayNameI18nKey)}
@@ -93,7 +101,7 @@ export function CoresSettings() {
             </SettingsTitle>
 
             <Select.Root onValueChange={handleValueChange} size='2' value={core}>
-              <Select.Trigger disabled={isLoading} />
+              <Select.Trigger disabled={isPending} />
               <Select.Content>
                 {platformMap[selectedPlatform].cores.map((core) => (
                   <Select.Item key={core} value={core}>
@@ -113,17 +121,10 @@ export function CoresSettings() {
 
           {showReset ? (
             <div className='flex justify-end'>
-              <UpdateButton
-                preference={{
-                  emulator: {
-                    core: { [core]: null },
-                    platform: { [selectedPlatform]: { core: null } },
-                  },
-                }}
-              >
+              <Button disabled={isPending} onClick={() => updateCore(null)} size='2' type='button' variant='soft'>
                 <span className='icon-[mdi--undo]' />
                 {t('emulator.resetToDefaultsDescription')}
-              </UpdateButton>
+              </Button>
             </div>
           ) : null}
         </div>

@@ -2,10 +2,12 @@ import { attemptAsync, delay, noop } from 'es-toolkit'
 import NoSleep from 'nosleep.js'
 import { Nostalgist } from 'nostalgist'
 import { useEffect, useMemo } from 'react'
-import { useLoaderData } from 'react-router'
+import { useLoaderData, useRevalidator } from 'react-router'
 import useSWRImmutable from 'swr/immutable'
 import { client } from '#@/api/client.ts'
+import type { CoreName } from '#@/constants/core.ts'
 import type { Rom } from '#@/controllers/roms/get-roms.ts'
+import type { State } from '#@/controllers/states/get-states.ts'
 import {
   useEmulatorLaunched,
   useIsFullscreen,
@@ -14,14 +16,12 @@ import {
 } from '#@/pages/library/atoms.ts'
 import { useIsDemo } from '#@/pages/library/hooks/use-demo.ts'
 import { useRom } from '#@/pages/library/hooks/use-rom.ts'
-import { useRouter } from '#@/pages/library/hooks/use-router.ts'
 import { getFileUrl } from '#@/pages/library/utils/file.ts'
 import { focus, offCancel, onCancel } from '#@/pages/library/utils/spatial-navigation.ts'
-import type { loader } from '#@/pages/routes/library-platform-rom.tsx'
 import { getCDNUrl } from '#@/utils/isomorphic/cdn.ts'
 import { getGlobalCSSVars } from '#@/utils/isomorphic/misc.ts'
 import { usePreference } from '../../../hooks/use-preference.ts'
-import { useEmulatorGamepadMapping } from '../emulator-session-provider.tsx'
+import { useEmulatorSession } from '../emulator-session-provider.tsx'
 
 type NostalgistOption = Parameters<typeof Nostalgist.prepare>[0]
 type RetroarchConfig = Partial<NostalgistOption['retroarchConfig']>
@@ -44,12 +44,12 @@ let noSleep: NoSleep
 const originalGetUserMedia = globalThis.navigator?.mediaDevices?.getUserMedia?.bind(globalThis.navigator.mediaDevices)
 export function useEmulator() {
   const rom: Rom = useRom()
-  const { state } = useLoaderData<typeof loader>()
+  const { core: playbackCore, state } = useLoaderData<{ core?: CoreName; state?: State | null }>()
   const { preference } = usePreference()
-  const emulatorGamepadMapping = useEmulatorGamepadMapping()
+  const { activeEmulator, emulatorGamepadMapping, setActiveEmulator } = useEmulatorSession()
   const [launched, setLaunched] = useEmulatorLaunched()
   const isDemo = useIsDemo()
-  const { reload } = useRouter()
+  const { revalidate } = useRevalidator()
   const [isFullscreen, setIsFullscreen] = useIsFullscreen()
   const [launchButton] = useLaunchButton()
   const [, setSpatialNavigationPaused] = useSpatialNavigationPaused()
@@ -58,7 +58,9 @@ export function useEmulator() {
     ? // @ts-expect-error we can guarantee the platform is supported here
       getCDNUrl(`retrobrews/${{ genesis: 'md' }[rom.platform] || rom.platform}-games`, rom.fileName)
     : getFileUrl(rom.fileId) || ''
-  const { core } = preference.emulator.platform[rom.platform] || {}
+  const core = activeEmulator?.core ?? playbackCore ?? preference.emulator.platform[rom.platform].core
+  const romId = activeEmulator?.romId ?? rom.id
+  const resumeState = state?.core === core ? state : undefined
 
   const platformShader = preference.emulator.platform[rom.platform].shader
   const shader =
@@ -72,7 +74,7 @@ export function useEmulator() {
     fileContent: getFileUrl(fileId),
     fileName,
   }))
-  const options: NostalgistOption = useMemo(
+  const playbackOptions: NostalgistOption = useMemo(
     () => ({
       bios,
       core,
@@ -91,22 +93,30 @@ export function useEmulator() {
       retroarchCoreConfig: preference.emulator.core[core],
       rom: romObject,
       shader,
-      state: state?.fileId ? getFileUrl(state.fileId) : undefined,
+      state: resumeState?.fileId ? getFileUrl(resumeState.fileId) : undefined,
     }),
-    [romObject, bios, core, preference, emulatorGamepadMapping, shader, state?.fileId, rom.platform],
+    [romObject, bios, core, preference, emulatorGamepadMapping, shader, resumeState?.fileId, rom.platform],
   )
+  const options = activeEmulator?.options ?? playbackOptions
 
   const {
-    data: emulator,
+    data: preparedEmulator,
     error,
     isValidating,
     mutate: prepare,
   } = useSWRImmutable(rom.mountedSource?.unsupportedReason ? null : options, () => Nostalgist.prepare(options))
 
+  const emulator = activeEmulator?.emulator ?? preparedEmulator
   const isPreparing = !rom || isValidating
 
   async function launch({ withState }: { withState?: boolean } = {}) {
-    if (!emulator || !rom || rom.mountedSource?.unsupportedReason) {
+    if (
+      !emulator ||
+      activeEmulator ||
+      isPreparing ||
+      rom.mountedSource?.unsupportedReason ||
+      (withState && !resumeState)
+    ) {
       return
     }
 
@@ -124,10 +134,11 @@ export function useEmulator() {
     canvas.dataset.snFocusStyle = JSON.stringify({ display: 'none' })
     focus(canvas)
 
+    setActiveEmulator({ core, emulator, options, romId })
     setLaunched(true)
 
     if (!isDemo) {
-      await client.launch_records.$post({ form: { core, rom: rom.id } })
+      await client.launch_records.$post({ form: { core, rom: romId } })
     }
   }
 
@@ -185,8 +196,9 @@ export function useEmulator() {
       focus(launchButton)
       offCancel()
       await attemptAsync(prepare)
+      setActiveEmulator(null)
       if (reloadAfterExit) {
-        await reload()
+        await revalidate()
       }
     }
   }
@@ -231,6 +243,8 @@ export function useEmulator() {
     launch,
     launched,
     prepare,
+    resumeState,
+    romId,
     setLaunched,
     start,
     toggleFullscreen,

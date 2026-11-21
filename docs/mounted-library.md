@@ -139,6 +139,16 @@ launched. This initial fork does not load their track/playlist dependencies.
 Archive/core/ROM-set compatibility is still the upstream browser runtime’s
 responsibility; indexing a supported extension is not a compatibility guarantee.
 
+On platforms with more than one emulator, use **Emulator for this game** on a
+game’s details page to choose one just for your account. Choose **Platform
+default** to follow your platform-wide setting again. Manual saves remain tied
+to the emulator that made them and are available when you switch back.
+Auto-save retention still applies per ROM, across all emulators.
+
+Before serving this version, self-hosted Workers deployments must apply any
+pending D1 migrations, including `0010_rom_core_preferences.sql`, to their
+library database. Node applies migrations automatically at startup.
+
 ## Metadata and covers
 
 Identification uses the installed msleuth SDK and its existing platform-scoped

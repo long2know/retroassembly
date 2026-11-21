@@ -17,7 +17,7 @@ import { GameMedia } from './components/game-media/game-media.tsx'
 export default function RomPage() {
   const { t } = useTranslation()
   const { isLargeScreen } = useViewport()
-  const { rom } = useLoaderData<typeof loader>()
+  const { gameCorePreference, rom } = useLoaderData<typeof loader>()
 
   const goodcodes = getRomGoodcodes(rom)
   const launchboxGame = rom.rawGameMetadata?.launchbox
@@ -48,7 +48,7 @@ export default function RomPage() {
 
             <div className='flex flex-col gap-8 lg:flex-col-reverse'>
               <div className='lg:px-4'>
-                <GameButtons />
+                <GameButtons gameCorePreference={gameCorePreference} />
               </div>
               <GameInfo rom={rom} />
             </div>
