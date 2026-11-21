@@ -3,25 +3,29 @@ import useSWRImmutable from 'swr/immutable'
 import useSWRMutation from 'swr/mutation'
 import { client, parseResponse } from '#@/api/client.ts'
 import { useShowGameOverlayContent } from '#@/pages/library/atoms.ts'
+import type { PlaylistPlayback } from '#@/pages/library/utils/mounted-playlist.ts'
 import { useEmulator } from './use-emulator.ts'
 
 const { $get, $post } = client.states
 
-async function getStateAndThumbnail(emulator: Nostalgist, object: { state?: File; thumbnail?: File } = {}) {
-  if (object.state && object.thumbnail) {
-    return object as { state: File; thumbnail: File }
-  }
-  let { state, thumbnail } = object
+interface SaveInput {
+  state?: File
+  thumbnail?: File
+}
+
+async function getStateAndThumbnail(
+  emulator: Nostalgist,
+  playlistPlayback?: PlaylistPlayback,
+  { state, thumbnail }: SaveInput = {},
+) {
   if (state) {
-    thumbnail = (await emulator.screenshot()) as unknown as File
-  } else {
-    const result = await emulator.saveState()
-    state = result.state as unknown as File
-    if (!thumbnail) {
-      thumbnail = result.thumbnail as unknown as File
+    if (playlistPlayback) {
+      throw new Error('External states do not have a playlist revision and disc')
     }
+    return { multiDiscIndex: undefined, state, thumbnail: thumbnail ?? (await emulator.screenshot()) }
   }
-  return { state, thumbnail }
+  const result = await (playlistPlayback ? playlistPlayback.saveState() : emulator.saveState())
+  return { ...result, thumbnail: thumbnail ?? result.thumbnail ?? (await emulator.screenshot()) }
 }
 
 async function forceGetEmulatorThumbnail(emulator: Nostalgist, resolution: { width: number; height: number }) {
@@ -46,13 +50,12 @@ async function forceGetEmulatorThumbnail(emulator: Nostalgist, resolution: { wid
   target.width = sw
   target.height = sh
   const context = target.getContext('2d')
-  return await new Promise<File>((resolve) => {
+  return await new Promise<Blob>((resolve) => {
     requestAnimationFrame(() => {
       // @ts-expect-error let's assume the context is always available
       context.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh)
       target.toBlob((blob) => {
         if (blob) {
-          // @ts-expect-error the returned value will be used as hono client form value
           resolve(blob)
         }
       })
@@ -61,7 +64,7 @@ async function forceGetEmulatorThumbnail(emulator: Nostalgist, resolution: { wid
 }
 
 export function useGameStates() {
-  const { core, emulator, romId } = useEmulator()
+  const { core, emulator, playlistPlayback, romId } = useEmulator()
   const [showGameOverlay] = useShowGameOverlayContent()
 
   const {
@@ -81,37 +84,42 @@ export function useGameStates() {
 
   const states = [...(manualStates || []), ...(autoStates || [])]
 
+  async function save(type: 'auto' | 'manual', arg?: SaveInput) {
+    if (!emulator || !core || !romId) {
+      throw new Error('invalid emulator or core or rom')
+    }
+    const result = await getStateAndThumbnail(emulator, playlistPlayback, arg)
+    const thumbnail =
+      core === 'mupen64plus_next'
+        ? await forceGetEmulatorThumbnail(emulator, { height: 3, width: 4 })
+        : result.thumbnail
+    await parseResponse(
+      $post({
+        form: {
+          core,
+          ...(playlistPlayback && {
+            disc: String(result.multiDiscIndex),
+            playlistRevision: playlistPlayback.playlist.revision,
+          }),
+          rom: romId,
+          state: new File([result.state], 'game.state'),
+          thumbnail: new File([thumbnail], 'game.png'),
+          type,
+        },
+      }),
+    )
+  }
+
   const { isMutating: isSavingManualState, trigger: saveManualState } = useSWRMutation(
     '/api/v1/states',
-    async (_key, { arg = {} }: { arg?: { state?: File; thumbnail?: File } }) => {
-      if (!emulator || !core || !romId) {
-        throw new Error('invalid emulator or core or rom')
-      }
-      const result = await getStateAndThumbnail(emulator, arg)
-      const { state } = result
-      let { thumbnail } = result
-      if (core === 'mupen64plus_next') {
-        thumbnail = await forceGetEmulatorThumbnail(emulator, { height: 3, width: 4 })
-      }
-      await $post({ form: { core, rom: romId, state, thumbnail, type: 'manual' } })
+    async (_key, { arg }: { arg?: SaveInput }) => {
+      await save('manual', arg)
       await Promise.all([reloadStates(), reloadAutoStates()])
     },
   )
 
   const { isMutating: isSavingAutoState, trigger: saveAutoState } = useSWRMutation('/api/v1/states', async () => {
-    if (!emulator || !core || !romId) {
-      throw new Error('invalid emulator or core or rom')
-    }
-    const result = await emulator.saveState()
-    const { state } = result
-    let { thumbnail } = result
-    if (core === 'mupen64plus_next') {
-      thumbnail = await forceGetEmulatorThumbnail(emulator, { height: 3, width: 4 })
-    }
-    await $post({
-      // @ts-expect-error actually we can use Blob here thought it says only File is accepted
-      form: { core, rom: romId, state, thumbnail, type: 'auto' },
-    })
+    await save('auto')
     await reloadAutoStates()
   })
 

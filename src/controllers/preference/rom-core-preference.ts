@@ -38,7 +38,10 @@ export async function getRomPlayback(rom: CorePreferenceRom) {
     gameCorePreference = { override, platformCore }
   }
   const core = gameCorePreference?.override ?? platformCore
-  const [state] = rom.mountedSource?.unsupportedReason ? [] : await getStates({ core, limit: 1, rom: rom.id })
+  const playlist = rom.mountedSource?.playlist
+  const [state] = rom.mountedSource?.unsupportedReason
+    ? []
+    : await getStates({ core, limit: 1, playlist, rom: rom.id, type: playlist ? 'all' : 'manual' })
   return { core, gameCorePreference, state }
 }
 

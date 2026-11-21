@@ -6,6 +6,7 @@ import net from 'node:net'
 import path from 'node:path'
 import { Uint8ArrayReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js'
 import { createSyntheticNesRom } from './fixtures/synthetic-nes.ts'
+import { writeSyntheticPsxMount } from './fixtures/synthetic-psx.ts'
 
 const project = process.cwd()
 const image = process.env.RETROASSEMBLY_MOUNTED_TEST_IMAGE || 'ghcr.io/long2know/retroassembly:latest'
@@ -145,6 +146,7 @@ try {
   await fs.writeFile(path.join(fixtures, 'outside.nes'), rom)
   await fs.symlink(path.join(fixtures, 'outside.nes'), path.join(romDirectory, 'escape.nes'))
   await fs.writeFile(path.join(romDirectory, 'ignored.txt'), 'Not a supported game\n')
+  await writeSyntheticPsxMount(romRoot)
   const before = { bios: await snapshot(biosRoot), roms: await snapshot(romRoot) }
   report.sourceBefore = before
   report.imageId = docker('image', 'inspect', image, '--format', '{{.Id}}')

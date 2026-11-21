@@ -24,7 +24,14 @@ interface HiddenMountedGame {
   platform: PlatformName
 }
 
+export interface PlaylistDiscRequest {
+  id: string
+  index: number
+  revision: string
+}
+
 interface MountedLibraryRuntime {
+  assertPlaylistDiscCurrent: (id: string, revision: string, index: number) => Promise<void>
   assertWritableDirectory: (directory: string) => Promise<void>
   enrichPending: () => Promise<void>
   getBioses: (platform: PlatformName) => MountedBios[]
@@ -36,6 +43,10 @@ interface MountedLibraryRuntime {
   retryArtwork: (options?: { platform?: PlatformName }) => MountedLibraryStatus
   updateSettings: (settings: Partial<MountedLibrarySettings>) => MountedLibraryStatus
   readFile: (id: string, signal?: AbortSignal) => Promise<{ body: ReadableStream; httpEtag: string; size: number }>
+  readPlaylistDisc: (
+    disc: PlaylistDiscRequest,
+    signal?: AbortSignal,
+  ) => Promise<{ body: ReadableStream; httpEtag: string; size: number }>
   scan: () => Promise<MountedScanStatus>
   scheduleEnrichment: () => void
   stop: () => void

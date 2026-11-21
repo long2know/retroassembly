@@ -7,6 +7,7 @@ import fs, {
   readdir,
   rename,
   rm,
+  rmdir,
   stat,
   symlink,
   writeFile,
@@ -24,7 +25,7 @@ import { contextStorage } from 'hono/context-storage'
 import { matchRoutes } from 'react-router'
 import { z } from 'zod'
 import { app as api } from '#@/api/app.ts'
-import { getMountedFormat, resolveMountedPlatform } from '#@/constants/mounted-library.ts'
+import { getMountedFormat, mountedPlaylistMaxBytes, resolveMountedPlatform } from '#@/constants/mounted-library.ts'
 import { getRomPlayback } from '#@/controllers/preference/rom-core-preference.ts'
 import {
   favoriteTable,
@@ -58,6 +59,12 @@ import { requireRom } from '#@/utils/server/rom-access.ts'
 import { createFilesystemStorage, createStorage } from '#@/utils/server/storage.ts'
 import { createSupabase } from '#@/utils/server/supabase.ts'
 
+const playlistBinding = z.object({ disc: z.number(), revision: z.string() })
+const playlistResponse = z.object({
+  discs: z.array(z.object({ path: z.string(), revision: z.string() })),
+  revision: z.string(),
+})
+
 const romResponse = z.object({
   fileId: z.string(),
   fileName: z.string(),
@@ -71,6 +78,7 @@ const romResponse = z.object({
       metadata: z.string(),
       metadataError: z.string().optional(),
       path: z.string(),
+      playlist: playlistResponse.optional(),
       revision: z.string(),
       unsupportedReason: z.string().optional(),
     })
@@ -137,6 +145,20 @@ async function writeFixture(root: string, relative: string, bytes: string | Uint
   const filename = path.join(root, relative)
   await mkdir(path.dirname(filename), { recursive: true })
   await writeFile(filename, bytes)
+}
+
+function playlistSaveForm(romId: string, type: 'auto' | 'manual', binding?: { disc: string; revision: string }) {
+  const body = new FormData()
+  body.set('core', 'pcsx_rearmed')
+  body.set('rom', romId)
+  body.set('state', new File(['state'], 'fixture.state'))
+  body.set('thumbnail', new File(['thumbnail'], 'fixture.png'))
+  body.set('type', type)
+  if (binding) {
+    body.set('disc', binding.disc)
+    body.set('playlistRevision', binding.revision)
+  }
+  return { body, method: 'POST' }
 }
 
 function trackFileHandles(t: TestContext, configure?: (handle: FileHandle) => void) {
@@ -273,7 +295,7 @@ async function fixture(t: TestContext, files: Record<string, string | Uint8Array
       .object({
         core: z.string(),
         gameCorePreference: z.object({ override: z.string().nullable(), platformCore: z.string() }).nullable(),
-        state: z.object({ core: z.string(), id: z.string() }).optional(),
+        state: z.object({ core: z.string(), id: z.string(), playlist: playlistBinding.nullable() }).optional(),
       })
       .parse(await response.json())
   }
@@ -538,7 +560,7 @@ await describe('mounted shared library', async () => {
 
     const defaultPlayback = await f.playback(game.id)
     assert.equal(defaultPlayback.core, 'fceumm')
-    assert.deepEqual(defaultPlayback.state, { core: 'fceumm', id: 'fceumm-state' })
+    assert.deepEqual(defaultPlayback.state, { core: 'fceumm', id: 'fceumm-state', playlist: null })
     const [alice, bob] = await Promise.all([
       expectStatus(f.setCore(game.id, 'nestopia'), 200),
       expectStatus(f.setCore(game.id, 'quicknes', 'bob'), 200),
@@ -548,7 +570,7 @@ await describe('mounted shared library', async () => {
     assert.deepEqual(await f.playback(game.id), {
       core: 'nestopia',
       gameCorePreference: { override: 'nestopia', platformCore: 'fceumm' },
-      state: { core: 'nestopia', id: 'nestopia-state' },
+      state: { core: 'nestopia', id: 'nestopia-state', playlist: null },
     })
     const otherPlayback = await f.playback(game.id, 'bob')
     assert.equal(otherPlayback.core, 'quicknes')
@@ -1205,7 +1227,7 @@ await describe('mounted shared library', async () => {
     const list = await f.list()
     const cue = list.roms.find((rom) => rom.fileName.endsWith('.cue'))
     const chd = list.roms.find((rom) => rom.fileName.endsWith('.chd'))
-    assert.ok(cue?.mountedSource?.unsupportedReason?.includes('CUE/M3U'))
+    assert.match(cue?.mountedSource?.unsupportedReason || '', /disc\/playlist format is not supported/u)
     assert.equal(chd?.mountedSource?.unsupportedReason, undefined)
     const form = new FormData()
     form.set('core', 'pcsx_rearmed')
@@ -1213,10 +1235,221 @@ await describe('mounted shared library', async () => {
     form.set('rom', cue.id)
     const launch = await f.request('/launch_records', { body: form, method: 'POST' })
     assert.equal(launch.status, 422)
-    assert.match(await launch.text(), /CUE\/M3U/u)
+    assert.match(await launch.text(), /disc\/playlist format is not supported/u)
     assert.equal(getMountedFormat('psx', '.iso')?.supported, false)
     assert.equal(getMountedFormat('psx', '.bin')?.supported, false)
     assert.equal(resolveMountedPlatform('shadps4'), undefined)
+  })
+
+  await it('indexes only bounded, case-exact local CHD playlists without absorbing standalone rows', async (t) => {
+    const invalid = {
+      absolute: ['/media/Disc.chd', /relative, unescaped/u],
+      backslash: [String.raw`Parts\Second.CHD`, /relative, unescaped/u],
+      case: ['parts/Second.CHD', /exact filename, case/u],
+      duplicate: ['First.chd', /duplicate disc/u],
+      encoded: ['%252e%252e/Outside.chd', /relative, unescaped/u],
+      missing: ['Missing.chd', /CHD not found/u],
+      mixed: ['Second.cue', /only .chd/u],
+      nested: ['Valid.m3u', /only .chd/u],
+      otherSystem: ['../../psx/Outside.chd', /relative, unescaped/u],
+      symlink: ['Link.chd', /links are not allowed/u],
+      url: ['https://fixture.invalid/Second.chd', /relative, unescaped/u],
+    } as const
+    const f = await fixture(t, {
+      'roms/nes/Not a PSX playlist.m3u': 'First.chd\nParts/Second.CHD\n',
+      'roms/ps1/Campaign/Bad UTF-8.m3u': Uint8Array.of(0xff),
+      'roms/ps1/Campaign/First.chd': 'independent disc one',
+      'roms/ps1/Campaign/Large.m3u': '#'.padEnd(mountedPlaylistMaxBytes + 1, ' '),
+      'roms/ps1/Campaign/One disc.m3u': 'First.chd\n',
+      'roms/ps1/Campaign/Parts/Second.CHD': 'independent disc two',
+      'roms/ps1/Campaign/Valid.m3u': '\uFEFF#EXTM3U\r\nParts/Second.CHD\r\n\r\n# Play order\r\nFirst.chd\n',
+      'roms/psx/Outside.chd': 'different root',
+      'roms/psx/Primary.m3u': 'Outside.chd\nSecond.chd\n',
+      'roms/psx/Second.chd': 'second primary disc',
+      ...Object.fromEntries(
+        Object.entries(invalid).map(([name, [line]]) => [`roms/ps1/Campaign/${name}.m3u`, `First.chd\n${line}\n`]),
+      ),
+      ...Object.fromEntries(
+        Array.from({ length: 9 }, (_, i) => [`roms/ps1/Campaign/Parts/Limited ${i}.chd`, `Disc ${i}`]),
+      ),
+      'roms/ps1/Campaign/Too many.m3u': Array.from({ length: 9 }, (_, i) => `Parts/Limited ${i}.chd`).join('\n'),
+    })
+    await symlink(path.join(f.roms, 'psx/Outside.chd'), path.join(f.roms, 'ps1/Campaign/Link.chd'))
+    const before = await sourceSnapshot(f.roms)
+    const scanned = await f.mounted.scan()
+    assert.equal(scanned.unsupported, Object.keys(invalid).length + 5)
+    const { roms } = await f.list()
+    const valid = roms.find(({ fileName }) => fileName === 'Campaign/Valid.m3u')
+    assert.ok(valid?.mountedSource?.playlist)
+    assert.deepEqual(
+      valid.mountedSource.playlist.discs.map(({ path }) => path),
+      ['ps1/Campaign/Parts/Second.CHD', 'ps1/Campaign/First.chd'],
+    )
+    assert.equal(roms.find(({ fileName }) => fileName === 'Primary.m3u')?.mountedSource?.playlist?.discs.length, 2)
+    for (const [name, [, reason]] of Object.entries(invalid)) {
+      const source = roms.find(({ fileName }) => fileName === `Campaign/${name}.m3u`)?.mountedSource
+      assert.match(source?.unsupportedReason || '', reason, name)
+      assert.equal(source?.playlist, undefined, name)
+    }
+    for (const [name, reason] of [
+      ['Campaign/Bad UTF-8.m3u', /UTF-8/u],
+      ['Campaign/Large.m3u', /64 KiB/u],
+      ['Campaign/One disc.m3u', /at least two/u],
+      ['Campaign/Too many.m3u', /at most 8/u],
+      ['Not a PSX playlist.m3u', /not supported/u],
+    ] as const) {
+      const rom = roms.find(({ fileName }) => fileName === name)
+      assert.ok(rom)
+      assert.match(rom.mountedSource?.unsupportedReason || '', reason)
+      await expectStatus(f.request(`/roms/${rom.id}/discs/1?revision=${valid.mountedSource.playlist.revision}`), 404)
+    }
+    const standalone = roms.find(({ fileName }) => fileName === 'Campaign/Parts/Second.CHD')
+    assert.ok(standalone && !standalone.mountedSource?.unsupportedReason)
+    const read = await expectStatus(f.request(`/files/${encodeURIComponent(standalone.fileId)}`), 200)
+    assert.equal(await read.text(), 'independent disc two')
+    assert.deepEqual(await sourceSnapshot(f.roms), before)
+  })
+
+  await it('streams only indexed playlist parts and revalidates visibility, dependencies and the descriptor', async (t) => {
+    const second = 'second'.repeat(60_000)
+    const f = await fixture(t, {
+      'roms/psx/Series/First.chd': 'first',
+      'roms/psx/Series/Second.chd': second,
+      'roms/psx/Series/Series.m3u': 'First.chd\nSecond.chd\n',
+    })
+    const initial = await f.list()
+    const game = initial.roms.find(({ fileName }) => fileName.endsWith('.m3u'))
+    assert.ok(game?.mountedSource?.playlist)
+    const original = game.mountedSource
+    const gameId = game.id
+    function url(index: number, revision = original.playlist?.revision) {
+      return `/roms/${gameId}/discs/${index}?revision=${revision}`
+    }
+    await expectStatus(f.request(url(1), {}, ''), 400)
+    await expectStatus(f.request(url(0)), 400)
+    await expectStatus(f.request(url(3)), 404)
+    await expectStatus(f.request(url(1, '../Outside.chd')), 400)
+    const head = await expectStatus(f.request(url(2), { method: 'HEAD' }, 'bob'), 200)
+    assert.equal(head.headers.get('Cache-Control'), 'private, no-store')
+    assert.equal(head.headers.get('Content-Length'), String(second.length))
+    assert.equal(await head.text(), '')
+    const data = await expectStatus(f.request(`${url(1)}&path=Outside.chd`), 200)
+    assert.equal(await data.text(), 'first')
+    const abort = new AbortController()
+    const streaming = await f.request(url(2), { signal: abort.signal })
+    assert.equal(streaming.status, 200)
+    assert.ok(streaming.body)
+    const reader = streaming.body.getReader()
+    const firstChunk = await reader.read()
+    assert.equal(firstChunk.done, false)
+    abort.abort()
+    await assert.rejects(reader.read(), { name: 'AbortError' })
+
+    await expectStatus(f.request(`/roms/${game.id}`, { method: 'DELETE' }), 200)
+    await expectStatus(f.request(url(1), {}, 'bob'), 404)
+    const restore = `/mounted-library/hidden/${game.id}/restore`
+    await expectStatus(f.request(restore, { method: 'POST' }), 200)
+    process.env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY = 'false'
+    await expectStatus(f.request(url(1)), 404)
+    process.env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY = 'true'
+
+    const secondFile = path.join(f.roms, 'psx/Series/Second.chd')
+    await rename(secondFile, `${secondFile}.old`)
+    await symlink(path.join(f.roms, 'psx/Series/First.chd'), secondFile)
+    await expectStatus(f.request(url(2)), 503)
+    await rm(secondFile)
+    await writeFile(secondFile, 'replacement')
+    await expectStatus(f.request(url(2), { method: 'HEAD' }), 409)
+
+    const incomplete = path.join(f.roms, 'psx/zzz')
+    await mkdir(incomplete)
+    const readDirectory = fs.readdir
+    const interruptedTraversal = t.mock.method(
+      fs,
+      'readdir',
+      async function read(...args: Parameters<typeof readDirectory>) {
+        if (args[0] === incomplete) {
+          throw new Error('Fixture traversal interrupted')
+        }
+        return await readDirectory(...args)
+      },
+    )
+    syncBuiltinESMExports()
+    try {
+      await assert.rejects(f.mounted.scan(), /Fixture traversal interrupted/u)
+      const afterFailure = await f.list()
+      assert.deepEqual(afterFailure.roms.find(({ id }) => id === game.id)?.mountedSource?.playlist, original.playlist)
+      await expectStatus(f.request(url(2)), 409)
+    } finally {
+      interruptedTraversal.mock.restore()
+      syncBuiltinESMExports()
+      await rmdir(incomplete)
+    }
+
+    await f.mounted.scan()
+    const afterScan = await f.list()
+    const refreshed = afterScan.roms.find(({ id }) => id === game.id)?.mountedSource
+    assert.ok(refreshed?.playlist)
+    assert.equal(refreshed.revision, original.revision)
+    assert.notEqual(refreshed.playlist.revision, original.playlist?.revision)
+    await expectStatus(f.request(url(1)), 409)
+    const updated = await expectStatus(f.request(url(2, refreshed.playlist.revision)), 200)
+    assert.equal(await updated.text(), 'replacement')
+
+    await writeFile(path.join(f.roms, original.path), 'Second.chd\nFirst.chd\n')
+    await expectStatus(f.request(url(1, refreshed.playlist.revision)), 409)
+    await rm(path.join(f.roms, original.path))
+    await expectStatus(f.request(url(1, refreshed.playlist.revision)), 503)
+    await f.mounted.scan()
+    await expectStatus(f.request(url(1, refreshed.playlist.revision)), 404)
+  })
+
+  await it('keeps playlist saves private and resumes only on their indexed revision and disc', async (t) => {
+    const f = await fixture(t, {
+      'roms/psx/First.chd': 'first',
+      'roms/psx/Second.chd': 'second',
+      'roms/psx/Test.m3u': 'First.chd\nSecond.chd\n',
+    })
+    const { roms } = await f.list()
+    const game = roms.find(({ fileName }) => fileName === 'Test.m3u')
+    const standalone = roms.find(({ fileName }) => fileName === 'Second.chd')
+    assert.ok(game?.mountedSource?.playlist && standalone)
+    const { revision } = game.mountedSource.playlist
+    await expectStatus(f.request('/states', playlistSaveForm(game.id, 'manual')), 409)
+    await expectStatus(f.request('/states', playlistSaveForm(game.id, 'manual', { disc: '3', revision })), 409)
+    await expectStatus(f.request('/states', playlistSaveForm(standalone.id, 'manual', { disc: '2', revision })), 409)
+    const single = await expectStatus(f.request('/states', playlistSaveForm(standalone.id, 'manual')), 200)
+    assert.equal(z.object({ playlist: z.null() }).parse(await single.json()).playlist, null)
+    for (const type of ['manual', 'auto'] as const) {
+      const result = await expectStatus(
+        f.request('/states', playlistSaveForm(game.id, type, { disc: '2', revision })),
+        200,
+      )
+      const saved = z.object({ fileId: z.string(), playlist: playlistBinding }).parse(await result.json())
+      assert.deepEqual(saved.playlist, { disc: 2, revision })
+      await expectStatus(f.request(`/files/${encodeURIComponent(saved.fileId)}`, {}, 'bob'), 404)
+    }
+    const playback = await f.playback(game.id)
+    const otherPlayback = await f.playback(game.id, 'bob')
+    assert.deepEqual(playback.state?.playlist, { disc: 2, revision })
+    assert.equal(otherPlayback.state, undefined)
+    const patch = new FormData()
+    patch.set('gameName', 'Manual playlist title')
+    await expectStatus(f.request(`/roms/${game.id}`, { body: patch, method: 'PATCH' }), 200)
+    await writeFile(path.join(f.roms, 'psx/Test.m3u'), 'Second.chd\nFirst.chd\n')
+    await expectStatus(f.request('/states', playlistSaveForm(game.id, 'auto', { disc: '2', revision })), 409)
+    await f.mounted.scan()
+    await expectStatus(f.request('/states', playlistSaveForm(game.id, 'manual', { disc: '2', revision })), 409)
+    const stale = await f.playback(game.id)
+    const rescanned = await f.list()
+    assert.equal(stale.state, undefined)
+    assert.equal(rescanned.roms.find(({ id }) => id === game.id)?.gameName, 'Manual playlist title')
+    const owner = await expectStatus(f.request(`/states?rom=${game.id}&type=manual`), 200)
+    assert.deepEqual(z.array(z.object({ playlist: playlistBinding })).parse(await owner.json()), [
+      { playlist: { disc: 2, revision } },
+    ])
+    const standalonePlayback = await f.playback(standalone.id)
+    assert.equal(standalonePlayback.state?.playlist, null)
   })
 
   await it('hashes the original ZIP cartridge payload, uses canonical art names, and reuses persisted negative-art and digest caches without source access', async (t) => {

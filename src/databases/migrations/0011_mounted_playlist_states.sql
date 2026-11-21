@@ -1,0 +1,1 @@
+ALTER TABLE `states` ADD `playlist` text;

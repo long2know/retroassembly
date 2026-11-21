@@ -6,6 +6,7 @@ import { useLoaderData, useRevalidator } from 'react-router'
 import useSWRImmutable from 'swr/immutable'
 import { client } from '#@/api/client.ts'
 import type { CoreName } from '#@/constants/core.ts'
+import { isCompatiblePlaylistState } from '#@/constants/mounted-library.ts'
 import type { Rom } from '#@/controllers/roms/get-roms.ts'
 import type { State } from '#@/controllers/states/get-states.ts'
 import {
@@ -17,6 +18,7 @@ import {
 import { useIsDemo } from '#@/pages/library/hooks/use-demo.ts'
 import { useRom } from '#@/pages/library/hooks/use-rom.ts'
 import { getFileUrl } from '#@/pages/library/utils/file.ts'
+import { prepareMountedPlaylist } from '#@/pages/library/utils/mounted-playlist.ts'
 import { focus, offCancel, onCancel } from '#@/pages/library/utils/spatial-navigation.ts'
 import { getCDNUrl } from '#@/utils/isomorphic/cdn.ts'
 import { getGlobalCSSVars } from '#@/utils/isomorphic/misc.ts'
@@ -46,7 +48,8 @@ export function useEmulator() {
   const rom: Rom = useRom()
   const { core: playbackCore, state } = useLoaderData<{ core?: CoreName; state?: State | null }>()
   const { preference } = usePreference()
-  const { activeEmulator, emulatorGamepadMapping, setActiveEmulator } = useEmulatorSession()
+  const { activeEmulator, emulatorGamepadMapping, playlistStartFailed, setActiveEmulator, setPlaylistStartFailed } =
+    useEmulatorSession()
   const [launched, setLaunched] = useEmulatorLaunched()
   const isDemo = useIsDemo()
   const { revalidate } = useRevalidator()
@@ -60,7 +63,8 @@ export function useEmulator() {
     : getFileUrl(rom.fileId) || ''
   const core = activeEmulator?.core ?? playbackCore ?? preference.emulator.platform[rom.platform].core
   const romId = activeEmulator?.romId ?? rom.id
-  const resumeState = state?.core === core ? state : undefined
+  const playlist = activeEmulator ? activeEmulator.playlistPlayback?.playlist : rom.mountedSource?.playlist
+  const resumeState = state?.core === core && isCompatiblePlaylistState(playlist, state.playlist) ? state : undefined
 
   const platformShader = preference.emulator.platform[rom.platform].shader
   const shader =
@@ -93,20 +97,25 @@ export function useEmulator() {
       retroarchCoreConfig: preference.emulator.core[core],
       rom: romObject,
       shader,
-      state: resumeState?.fileId ? getFileUrl(resumeState.fileId) : undefined,
+      state: !playlist && resumeState?.fileId ? getFileUrl(resumeState.fileId) : undefined,
     }),
-    [romObject, bios, core, preference, emulatorGamepadMapping, shader, resumeState?.fileId, rom.platform],
+    [romObject, bios, core, preference, emulatorGamepadMapping, shader, playlist, resumeState?.fileId, rom.platform],
   )
   const options = activeEmulator?.options ?? playbackOptions
 
   const {
-    data: preparedEmulator,
+    data: prepared,
     error,
     isValidating,
     mutate: prepare,
-  } = useSWRImmutable(rom.mountedSource?.unsupportedReason ? null : options, () => Nostalgist.prepare(options))
+  } = useSWRImmutable(rom.mountedSource?.unsupportedReason ? null : { options, playlist, romId }, async (key) =>
+    key.playlist
+      ? await prepareMountedPlaylist(key.options, key.romId, key.playlist)
+      : { emulator: await Nostalgist.prepare(key.options), playlistPlayback: undefined },
+  )
 
-  const emulator = activeEmulator?.emulator ?? preparedEmulator
+  const emulator = activeEmulator?.emulator ?? prepared?.emulator
+  const playlistPlayback = activeEmulator?.playlistPlayback ?? prepared?.playlistPlayback
   const isPreparing = !rom || isValidating
 
   async function launch({ withState }: { withState?: boolean } = {}) {
@@ -120,7 +129,7 @@ export function useEmulator() {
       return
     }
 
-    if (!withState) {
+    if (!withState && !playlistPlayback) {
       emulator.getEmulator().on('beforeLaunch', () => {
         try {
           //@ts-expect-error Using an undocumented API here. There should be a way to do this.
@@ -134,10 +143,15 @@ export function useEmulator() {
     canvas.dataset.snFocusStyle = JSON.stringify({ display: 'none' })
     focus(canvas)
 
-    setActiveEmulator({ core, emulator, options, romId })
+    const resumePlaylistState =
+      withState && resumeState?.playlist
+        ? { state: resumeState.playlist, url: getFileUrl(resumeState.fileId) }
+        : undefined
+    setPlaylistStartFailed(false)
+    setActiveEmulator({ core, emulator, options, playlistPlayback, resumePlaylistState, romId })
     setLaunched(true)
 
-    if (!isDemo) {
+    if (!isDemo && !playlistPlayback) {
       await client.launch_records.$post({ form: { core, rom: romId } })
     }
   }
@@ -150,10 +164,20 @@ export function useEmulator() {
       // @ts-expect-error an ad-hoc patch for disabling request for camera access
       globalThis.navigator.mediaDevices.getUserMedia = null
     } catch {}
-    await emulator.start()
     try {
-      globalThis.navigator.mediaDevices.getUserMedia = originalGetUserMedia
-    } catch {}
+      await (playlistPlayback ? playlistPlayback.start(activeEmulator?.resumePlaylistState) : emulator.start())
+    } catch (error) {
+      if (!playlistPlayback) {
+        throw error
+      }
+      setPlaylistStartFailed(true)
+      await exit()
+      return
+    } finally {
+      try {
+        globalThis.navigator.mediaDevices.getUserMedia = originalGetUserMedia
+      } catch {}
+    }
     const canvas = emulator.getCanvas()
     if (canvas) {
       canvas.style.opacity = '1'
@@ -178,14 +202,18 @@ export function useEmulator() {
       await delay(0)
       emulator.sendCommand('PAUSE_TOGGLE')
     }
+    if (!isDemo && playlistPlayback) {
+      await client.launch_records.$post({ form: { core, rom: romId } })
+    }
   }
 
   async function exit({ reloadAfterExit = false } = {}) {
     const status = emulator?.getStatus() || ''
-    if (['paused', 'running'].includes(status)) {
+    if (['paused', 'running'].includes(status) || (status === 'initial' && activeEmulator?.playlistPlayback)) {
+      playlistPlayback?.close()
       emulator?.exit()
       setLaunched(false)
-      noSleep.disable()
+      noSleep?.disable()
       const promises: Promise<void>[] = []
       if (document.fullscreenElement) {
         promises.push(document.exitFullscreen())
@@ -242,10 +270,14 @@ export function useEmulator() {
     isPreparing,
     launch,
     launched,
+    playlist,
+    playlistPlayback,
+    playlistStartFailed,
     prepare,
     resumeState,
     romId,
     setLaunched,
+    setPlaylistStartFailed,
     start,
     toggleFullscreen,
   }

@@ -38,18 +38,24 @@ export function useAutosave() {
     }
 
     async function triggerAutosave() {
+      const scheduled = timeoutRef.current
       const status = emulator?.getStatus()
-      if (status !== 'running') {
+      if (!scheduled || !status || status === 'terminated') {
+        timeoutRef.current = null
         return
       }
 
-      try {
-        await saveAutoState()
-      } catch {}
+      if (status === 'running') {
+        try {
+          await saveAutoState()
+        } catch {}
+      }
 
-      const ms = intervalSeconds * 1000
-      nextSaveAtRef.current = Date.now() + ms
-      timeoutRef.current = setTimeout(triggerAutosave, ms)
+      if (timeoutRef.current === scheduled) {
+        const ms = intervalSeconds * 1000
+        nextSaveAtRef.current = Date.now() + ms
+        timeoutRef.current = setTimeout(triggerAutosave, ms)
+      }
     }
 
     if (overlayVisible) {

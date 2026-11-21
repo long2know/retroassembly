@@ -5,6 +5,7 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { DateTime } from 'luxon'
 import { z } from 'zod'
+import { mountedPlaylistMaxDiscs, mountedRevisionPattern } from '#@/constants/mounted-library.ts'
 import { isPlatformName, type PlatformName } from '#@/constants/platform.ts'
 import { deleteLaunchRecord } from '#@/controllers/launch-records/delete-launch-record.ts'
 import { createRom } from '#@/controllers/roms/create-roms.ts'
@@ -19,7 +20,7 @@ import { getStates } from '#@/controllers/states/get-states.ts'
 import { dateFormatMap } from '#@/utils/isomorphic/i18n.ts'
 import { getMountedLibrary } from '#@/utils/server/mounted-library-runtime.ts'
 import { nanoid } from '#@/utils/server/nanoid.ts'
-import { requireEditableRom } from '#@/utils/server/rom-access.ts'
+import { requireEditableRom, requireRom } from '#@/utils/server/rom-access.ts'
 import { createFileResponse } from '../utils.ts'
 
 export const roms = new Hono()
@@ -167,6 +168,37 @@ export const roms = new Hono()
       return createFileResponse(object, undefined, head)
     }
   })
+
+  .get(
+    ':id/discs/:disc',
+    zValidator(
+      'param',
+      z.object({
+        disc: z
+          .string()
+          .regex(/^[1-9]\d?$/u)
+          .transform(Number)
+          .pipe(z.number().max(mountedPlaylistMaxDiscs)),
+        id: z.string(),
+      }),
+    ),
+    zValidator('query', z.object({ revision: z.string().regex(mountedRevisionPattern) })),
+    async (c) => {
+      const { disc, id } = c.req.valid('param')
+      const { revision } = c.req.valid('query')
+      const rom = await requireRom(id)
+      const library = getMountedLibrary()
+      if (!rom.mountedSource?.playlist || !library) {
+        throw new HTTPException(404, { message: 'Mounted playlist not found' })
+      }
+      const file = await library.readPlaylistDisc({ id, index: disc, revision }, c.req.raw.signal)
+      const head = c.req.method === 'HEAD'
+      if (head) {
+        await file.body.cancel()
+      }
+      return createFileResponse(file, `disc-${disc}.chd`, head)
+    },
+  )
 
   .post(
     ':id/identify',

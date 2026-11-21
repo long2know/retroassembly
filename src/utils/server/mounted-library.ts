@@ -7,6 +7,7 @@ import {
   getMountedFormat,
   resolveMountedPlatform,
   type MountedLibrarySettings,
+  type MountedMediaFile,
   type MountedMetadataProgress,
   type MountedSource,
 } from '#@/constants/mounted-library.ts'
@@ -31,7 +32,9 @@ import {
   type MountedBios,
   type MountedScanStatus,
   type MountedMetadataMatch,
+  type PlaylistDiscRequest,
 } from './mounted-library-runtime.ts'
+import { inspectMountedPlaylist, isMountedPlaylistPath, openIndexedMountedMedia } from './mounted-playlist.ts'
 
 type Library = ReturnType<typeof createDrizzle>['library']
 type ScanSnapshot = Omit<
@@ -156,30 +159,43 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
     try {
       const warnings: string[] = []
       const discovered = new Map<string, { fileName: string; platform: PlatformName; source: MountedSource }>()
+      const discs = new Map<string, MountedMediaFile>()
+      const playlists: MountedSource[] = []
       for await (const relative of walkMountedFiles(configuration.roms, '', true)) {
         const [system, ...segments] = relative.split('/')
         const platform = resolveMountedPlatform(system)
         if (!platform || segments.length === 0) {
           continue
         }
-        const format = getMountedFormat(platform, path.posix.extname(relative))
+        const extension = path.posix.extname(relative)
+        const format = getMountedFormat(platform, extension)
         if (!format) {
           continue
         }
         const fileId = getMountedFileId('roms', relative)
         const { revision } = await getMountedFileInfo(configuration.roms, relative)
-        discovered.set(fileId, {
-          fileName: segments.join('/'),
-          platform,
-          source: {
-            artwork: automaticMetadataEnabled() ? 'pending' : 'disabled',
-            available: true,
-            metadata: automaticMetadataEnabled() ? 'pending' : 'disabled',
-            path: relative,
-            revision,
-            unsupportedReason: format.unsupportedReason,
-          },
-        })
+        const source: MountedSource = {
+          artwork: automaticMetadataEnabled() ? 'pending' : 'disabled',
+          available: true,
+          metadata: automaticMetadataEnabled() ? 'pending' : 'disabled',
+          path: relative,
+          revision,
+          unsupportedReason: format.unsupportedReason,
+        }
+        discovered.set(fileId, { fileName: segments.join('/'), platform, source })
+        if (platform === 'psx') {
+          if (extension.toLowerCase() === '.chd') {
+            discs.set(relative, { path: relative, revision })
+          } else if (isMountedPlaylistPath(relative)) {
+            playlists.push(source)
+          }
+        }
+      }
+      for (const source of playlists) {
+        Object.assign(
+          source,
+          await inspectMountedPlaylist(configuration.roms, source, (relative) => discs.get(relative)),
+        )
       }
       const discoveredBios = await discoverBios(warnings)
       await assertMountedRootAvailable(configuration.roms)
@@ -214,14 +230,22 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
             continue
           }
           const replaced = previous.revision !== item.source.revision
-          if (replaced || !previous.available) {
+          const playlistChanged =
+            item.platform === 'psx' &&
+            isMountedPlaylistPath(item.source.path) &&
+            (previous.playlist?.revision !== item.source.playlist?.revision ||
+              previous.unsupportedReason !== item.source.unsupportedReason)
+          if (replaced || !previous.available || playlistChanged) {
             const mountedSource =
               replaced && previous.metadata !== 'manual'
                 ? item.source
                 : {
                     ...previous,
                     available: true,
+                    playlist: item.source.playlist,
+                    playlistIssue: item.source.playlistIssue,
                     revision: item.source.revision,
+                    unsupportedReason: item.source.unsupportedReason,
                     ...(replaced ? { identification: undefined } : {}),
                   }
             transaction
@@ -332,7 +356,7 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
     if (!rom?.source) {
       throw new HTTPException(404, { message: 'Hidden mounted ROM not found' })
     }
-    const { available, path: relative, revision } = rom.source
+    const { available, path: relative, playlist, revision } = rom.source
     if (!available) {
       throw new HTTPException(409, { message: 'Hidden mounted ROM is unavailable in the index; rescan required' })
     }
@@ -349,6 +373,10 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
     if (currentRevision !== revision) {
       throw new HTTPException(409, { message: 'Mounted file changed; rescan the mounted library before restoring' })
     }
+    for (const disc of playlist?.discs ?? []) {
+      const { handle } = await openIndexedMountedMedia(configuration.roms, disc)
+      await handle.close()
+    }
     const restored = library
       .update(romTable)
       .set({ status: statusEnum.normal })
@@ -359,6 +387,7 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
           sql`json_extract(${romTable.mountedSource}, '$.available') = 1`,
           sql`json_extract(${romTable.mountedSource}, '$.path') = ${relative}`,
           sql`json_extract(${romTable.mountedSource}, '$.revision') = ${revision}`,
+          sql`json_extract(${romTable.mountedSource}, '$.playlist.revision') IS ${playlist?.revision ?? null}`,
         ),
       )
       .returning({ id: romTable.id })
@@ -419,6 +448,59 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
       if (error instanceof HTTPException) {
         throw error
       }
+      throw new HTTPException(503, { cause: error, message: 'Mounted source unavailable or unsafe; rescan required' })
+    }
+  }
+
+  function getIndexedPlaylist(id: string, revision: string) {
+    const rom = library
+      .select({ fileId: romTable.fileId, source: romTable.mountedSource })
+      .from(romTable)
+      .where(and(eq(romTable.id, id), visibleMountedCondition('psx')))
+      .get()
+    if (
+      stopped ||
+      !rom?.source?.playlist ||
+      rom.source.unsupportedReason ||
+      rom.fileId !== getMountedFileId('roms', rom.source.path)
+    ) {
+      throw new HTTPException(404, { message: 'Mounted playlist not found' })
+    }
+    if (rom.source.playlist.revision !== revision) {
+      throw new HTTPException(409, { message: 'Mounted playlist changed; reload the game before loading a disc' })
+    }
+    return { playlist: rom.source.playlist, source: rom.source }
+  }
+
+  async function openPlaylistDisc(id: string, revision: string, index: number) {
+    const { playlist, source } = getIndexedPlaylist(id, revision)
+    const disc = playlist.discs[index - 1]
+    if (!disc) {
+      throw new HTTPException(404, { message: 'Mounted playlist disc not found' })
+    }
+    const descriptor = await openIndexedMountedMedia(configuration.roms, source)
+    await descriptor.handle.close()
+    const file = await openIndexedMountedMedia(configuration.roms, disc)
+    try {
+      getIndexedPlaylist(id, revision)
+      return file
+    } catch (error) {
+      await file.handle.close()
+      throw error
+    }
+  }
+
+  async function assertPlaylistDiscCurrent(id: string, revision: string, index: number) {
+    const { handle } = await openPlaylistDisc(id, revision, index)
+    await handle.close()
+  }
+
+  async function readPlaylistDisc({ id, index, revision }: PlaylistDiscRequest, signal?: AbortSignal) {
+    const { handle, revision: discRevision, size } = await openPlaylistDisc(id, revision, index)
+    try {
+      return { body: createMountedFileStream(handle, signal), httpEtag: `"${discRevision}"`, size }
+    } catch (error) {
+      await handle.close()
       throw new HTTPException(503, { cause: error, message: 'Mounted source unavailable or unsafe; rescan required' })
     }
   }
@@ -655,6 +737,7 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
   }
 
   return {
+    assertPlaylistDiscCurrent,
     assertWritableDirectory,
     configuration,
     enrichPending,
@@ -676,6 +759,7 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
     },
     listHiddenGames,
     readFile,
+    readPlaylistDisc,
     refreshMetadata(options: { platform?: PlatformName; retryArtwork?: boolean } = {}) {
       return startMetadataJob('metadata', options)
     },

@@ -1,6 +1,7 @@
 import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { mountedPlaylistMaxDiscs, mountedRevisionPattern } from '#@/constants/mounted-library.ts'
 import { deleteStates } from '#@/controllers/states/delete-states.ts'
 import { createState } from '../../../controllers/states/create-state.ts'
 import { getStates } from '../../../controllers/states/get-states.ts'
@@ -32,6 +33,13 @@ export const states = new Hono()
       'form',
       z.object({
         core: z.string(),
+        disc: z
+          .string()
+          .regex(/^[1-9]\d?$/u)
+          .transform(Number)
+          .pipe(z.number().max(mountedPlaylistMaxDiscs))
+          .optional(),
+        playlistRevision: z.string().regex(mountedRevisionPattern).optional(),
         rom: z.string(),
         state: z.instanceof(Blob),
         thumbnail: z.instanceof(Blob),

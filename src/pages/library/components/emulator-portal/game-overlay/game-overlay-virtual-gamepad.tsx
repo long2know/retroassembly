@@ -5,6 +5,7 @@ import { useEmulatorLaunched } from '#@/pages/library/atoms.ts'
 import { useGamepads } from '#@/pages/library/hooks/use-gamepads.ts'
 import { usePreference } from '#@/pages/library/hooks/use-preference.ts'
 import { useRom } from '#@/pages/library/hooks/use-rom.ts'
+import { useEmulatorSession } from '../emulator-session-provider.tsx'
 import { useEmulator } from '../hooks/use-emulator.ts'
 import { useGameOverlay } from '../hooks/use-game-overlay.ts'
 import { VirtualGamepadButton } from './virtual-gamepad-button.tsx'
@@ -82,7 +83,9 @@ export function GameOverlayVirtualGamepad() {
   const [launched] = useEmulatorLaunched()
   const rom = useRom()
   const { preference } = usePreference()
-  const rewindEnabled = rom ? preference.emulator.platform[rom.platform].rewindEnabled : true
+  const { activeEmulator } = useEmulatorSession()
+  const rewindEnabled =
+    !activeEmulator?.playlistPlayback && (rom ? preference.emulator.platform[rom.platform].rewindEnabled : true)
 
   if (!launched) {
     return

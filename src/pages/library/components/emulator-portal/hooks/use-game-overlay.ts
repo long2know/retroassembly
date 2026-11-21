@@ -7,11 +7,11 @@ import { useGameStates } from './use-game-states.ts'
 export function useGameOverlay() {
   const [visible, setVisible] = useShowGameOverlayContent()
   const [isPending, setIsPending] = useIsGameOverlayPendingAtom()
-  const { emulator } = useEmulator()
+  const { emulator, playlistPlayback } = useEmulator()
   const { reloadStates } = useGameStates()
 
   async function show() {
-    if (emulator) {
+    if (emulator && (!playlistPlayback || playlistPlayback.hasStarted())) {
       const status = emulator.getStatus()
       if (status === 'running' || status === 'paused') {
         emulator.pause()

@@ -1,12 +1,14 @@
 import { ScrollArea } from '@radix-ui/themes'
 import { groupBy } from 'es-toolkit'
 import { useTranslation } from 'react-i18next'
+import { useEmulator } from '../hooks/use-emulator.ts'
 import { useGameStates } from '../hooks/use-game-states.ts'
 import { GameState } from './game-state.tsx'
 import { LoadExternalState } from './load-external-state.tsx'
 
 export function GameStates() {
   const { t } = useTranslation()
+  const { playlist } = useEmulator()
   const { states } = useGameStates()
 
   const { auto, manual } = groupBy(states, ({ type }) => type)
@@ -17,7 +19,7 @@ export function GameStates() {
         <span className='icon-[mdi--database] size-7' />
         {t('emulator.savedStates')}
         <span className='flex-1' />
-        <LoadExternalState />
+        {playlist ? null : <LoadExternalState />}
       </h3>
       <ScrollArea className='overflow-visible! lg:h-44! lg:overflow-hidden!' size='2'>
         {manual && manual.length > 0 ? (

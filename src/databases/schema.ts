@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import type { CoreName } from '#@/constants/core.ts'
-import type { MountedSource } from '#@/constants/mounted-library.ts'
+import type { MountedPlaylistState, MountedSource } from '#@/constants/mounted-library.ts'
 import type { PlatformName } from '#@/constants/platform.ts'
 import type { PreferenceSnippet } from '../constants/preference.ts'
 import { nanoid } from '../utils/server/nanoid.ts'
@@ -130,6 +130,7 @@ export const stateTable = sqliteTable(
   {
     core: text().notNull(),
     platform: text().notNull(),
+    playlist: text({ mode: 'json' }).$type<MountedPlaylistState>(),
     romId: text().notNull(),
     thumbnailFileId: text().notNull(),
     type: text({ enum: ['auto', 'manual'] }).notNull(),
