@@ -85,6 +85,13 @@
       "when": 1795225226934,
       "tag": "0011_mounted_playlist_states",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795242548165,
+      "tag": "0012_private_game_collections",
+      "breakpoints": true
     }
   ]
 }

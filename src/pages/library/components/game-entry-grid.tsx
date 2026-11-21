@@ -1,9 +1,18 @@
+import type { ReactNode } from 'react'
 import { usePreference } from '../hooks/use-preference.ts'
 import { GameEntry } from './game-entry/game-entry.tsx'
 
 const sizeMap = { 'extra-large': 60, 'extra-small': 36, large: 54, medium: 48, small: 42 }
 
-export function GameEntryGrid({ roms }: { readonly roms: any[] }) {
+interface GameEntryGridProps<TRom> {
+  renderActions?: (rom: TRom) => ReactNode
+  roms: readonly TRom[]
+}
+
+export function GameEntryGrid<TRom extends { id: string }>({
+  renderActions,
+  roms,
+}: Readonly<GameEntryGridProps<TRom>>) {
   const { preference } = usePreference()
   const size = sizeMap[preference.ui.libraryCoverSize]
 
@@ -12,7 +21,7 @@ export function GameEntryGrid({ roms }: { readonly roms: any[] }) {
   return (
     <div className='grid [--min-width:150px] lg:[--min-width:100%]' style={{ gridTemplateColumns }}>
       {roms.map((rom) => (
-        <GameEntry key={rom.id} rom={rom} />
+        <GameEntry actions={renderActions?.(rom)} key={rom.id} rom={rom} />
       ))}
     </div>
   )

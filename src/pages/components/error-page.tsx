@@ -2,9 +2,8 @@ import { Button } from '@radix-ui/themes'
 import { useTranslation } from 'react-i18next'
 import { isRouteErrorResponse, Link } from 'react-router'
 import { metadata } from '#@/constants/metadata.ts'
-import type { Route } from '../+types/root.ts'
 
-export function ErrorPage({ error }: Readonly<Route.ErrorBoundaryProps>) {
+export function ErrorPage({ error }: Readonly<{ error: unknown }>) {
   const { t } = useTranslation()
 
   let message = t('common.oops')

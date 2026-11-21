@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { createMiddleware } from 'hono/factory'
+import { collections } from './collections.ts'
 import { favorites } from './favorites.ts'
 import { files } from './files.ts'
 import { launchRecords } from './launch-records.ts'
@@ -17,6 +18,7 @@ const authMiddleware = createMiddleware(async (c, next) => {
 })
 
 export const app = new Hono()
+  .route('collections', collections)
   .use(authMiddleware)
   .route('favorites', favorites)
   .route('files', files)

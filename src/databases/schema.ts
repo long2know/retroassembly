@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import type { CoreName } from '#@/constants/core.ts'
 import type { MountedPlaylistState, MountedSource } from '#@/constants/mounted-library.ts'
 import type { PlatformName } from '#@/constants/platform.ts'
@@ -195,6 +195,32 @@ export const favoriteTable = sqliteTable(
     // For remove-favorite.ts: soft-delete favorite with status check
     index('idx_favorites_user_rom_status').on(table.userId, table.romId, table.status),
   ],
+)
+
+export const gameCollectionTable = sqliteTable(
+  'game_collections',
+  {
+    name: text().notNull(),
+    nameKey: text().notNull(),
+    userId: text().notNull(),
+    ...baseSchema,
+  },
+  (table) => [
+    uniqueIndex('idx_game_collections_user_name')
+      .on(table.userId, table.nameKey)
+      .where(sql`${table.status} = 1`),
+  ],
+)
+
+export const gameCollectionRomTable = sqliteTable(
+  'game_collection_roms',
+  {
+    collectionId: text()
+      .notNull()
+      .references(() => gameCollectionTable.id, { onDelete: 'cascade' }),
+    romId: text().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.collectionId, table.romId] })],
 )
 
 export const mountedLibrarySettingsTable = sqliteTable('mounted_library_settings', {

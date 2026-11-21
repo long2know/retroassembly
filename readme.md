@@ -56,6 +56,8 @@ use the fork's deployment guide above for its mounted-library image.
 
 - [x] Relive memories from numerous retro gaming consoles in the browser. NES, SNES, Genesis, GameBoy, Arcade... See [Supported Platforms](#supported-platforms) below.
 - [x] See your game collection displayed with auto-detected beautiful box arts and covers.
+- [x] Organize games across platforms in private named **Collections**. Create a list from
+      library navigation, then use **Collections** on a game's details page to add or remove it.
 - [x] Save and synchronize your game at any point and resume later.
 - [x] Made a mistake? Some emulators allow you to rewind gameplay.
 - [x] Browse through platforms and your game library with an intuitive interface with [spatial navigation](https://en.wikipedia.org/wiki/Spatial_navigation), which means you can just use a keyboard or a gamepad to navigate between games.
