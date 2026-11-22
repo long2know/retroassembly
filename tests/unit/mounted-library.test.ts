@@ -1415,6 +1415,95 @@ await describe('mounted shared library', async () => {
     assert.equal(await readFile(path.join(f.storage, ownRom.fileId), 'utf8'), 'owned upload bytes')
   })
 
+  await it('enables a previously unsupported Virtual Boy BIN on rescan without replacing the mounted ROM', async (t) => {
+    const bytes = 'Original synthetic VB cartridge bytes'
+    const f = await fixture(t, {
+      'roms/ps1/Unsupported.bin': bytes,
+      'roms/vb/Hidden.bin': bytes,
+      'roms/virtualboy/Signal.BIN': bytes,
+    })
+    const before = await sourceSnapshot(f.roms)
+    const roms = f.library.select().from(romTable).all()
+    const hidden = roms.find(({ fileName }) => fileName === 'Hidden.bin')
+    const game = roms.find(({ fileName }) => fileName === 'Signal.BIN')
+    const psx = roms.find(({ fileName }) => fileName === 'Unsupported.bin')
+    assert.ok(game?.mountedSource && hidden?.mountedSource && psx?.mountedSource)
+    const unsupportedReason =
+      'The .BIN format is not supported for vb by this browser integration. The source is indexed without conversion and cannot be launched.'
+    const manual = {
+      gameBoxartFileIds: 'attachments/alice/vb-cover.png',
+      gameDescription: 'Manual description',
+      gameName: 'Manual title',
+    }
+    const source = {
+      ...game.mountedSource,
+      artwork: 'manual' as const,
+      metadata: 'manual' as const,
+      unsupportedReason,
+    }
+    const identification = await getMountedIdentification({ ...game, mountedSource: source }, f.configuration.roms)
+    assert.equal(identification.mode, 'name-only')
+    await writeFixture(f.storage, manual.gameBoxartFileIds, 'app-owned artwork')
+    f.library
+      .update(romTable)
+      .set({ ...manual, mountedSource: { ...source, identification } })
+      .where(eq(romTable.id, game.id))
+      .run()
+    f.library
+      .update(romTable)
+      .set({ mountedSource: { ...hidden.mountedSource, unsupportedReason } })
+      .where(eq(romTable.id, hidden.id))
+      .run()
+    await expectStatus(f.request(`/roms/${hidden.id}`, { method: 'DELETE' }), 200)
+
+    function launch(id: string, core = 'mednafen_vb', user = 'alice') {
+      const body = new FormData()
+      body.set('core', core)
+      body.set('rom', id)
+      return f.request('/launch_records', { body, method: 'POST' }, user)
+    }
+
+    const blocked = await expectStatus(launch(game.id), 422)
+    assert.deepEqual(await blocked.json(), { message: unsupportedReason })
+    await expectStatus(f.request('/mounted-library', { method: 'POST' }), 200)
+    const refreshed = f.library.select().from(romTable).where(eq(romTable.id, game.id)).get()
+    assert.ok(refreshed?.mountedSource)
+    assert.partialDeepStrictEqual(refreshed, {
+      ...manual,
+      fileId: game.fileId,
+      id: game.id,
+      mountedSource: {
+        artwork: 'manual',
+        available: true,
+        metadata: 'manual',
+        path: source.path,
+        revision: source.revision,
+      },
+      platform: 'vb',
+    })
+    assert.equal(refreshed.mountedSource.unsupportedReason, undefined)
+    const hashed = await getMountedIdentification(refreshed, f.configuration.roms)
+    assert.equal(hashed.mode, 'file')
+    assert.equal(hashed.md5, createHash('md5').update(bytes).digest('hex'))
+    assert.equal(await readFile(path.join(f.storage, manual.gameBoxartFileIds), 'utf8'), 'app-owned artwork')
+
+    const contentUrl = `/roms/${game.id}/content`
+    await expectStatus(f.request(contentUrl, {}, ''), 400)
+    await expectStatus(launch(game.id, 'mednafen_vb', ''), 400)
+    const playback = await f.playback(game.id)
+    assert.equal(playback.core, 'mednafen_vb')
+    await expectStatus(launch(game.id), 200)
+    const launched = f.library.select().from(launchRecordTable).get()
+    assert.partialDeepStrictEqual(launched, { core: 'mednafen_vb', platform: 'vb', romId: game.id, userId: 'alice' })
+    const content = await expectStatus(f.request(contentUrl), 200)
+    assert.equal(content.headers.get('ETag'), `"${source.revision}"`)
+    assert.equal(await content.text(), bytes)
+    await expectStatus(launch(hidden.id), 404)
+    await expectStatus(f.request(`/roms/${hidden.id}/content`), 404)
+    await expectStatus(launch(psx.id, 'pcsx_rearmed'), 422)
+    assert.deepEqual(await sourceSnapshot(f.roms), before)
+  })
+
   await it('refreshes legacy PlayStation PBP guidance only after a complete scan without enabling launch', async (t) => {
     const f = await fixture(t, {
       'roms/PSX/First.chd': 'synthetic first CHD',

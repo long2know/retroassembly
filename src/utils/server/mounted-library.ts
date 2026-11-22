@@ -236,6 +236,10 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
             previous.playlistIssue?.code !== item.source.playlistIssue?.code ||
             previous.playlistIssue?.line !== item.source.playlistIssue?.line
           if (replaced || !previous.available || compatibilityChanged) {
+            const staleIdentification =
+              previous.unsupportedReason &&
+              !item.source.unsupportedReason &&
+              previous.identification?.mode === 'name-only'
             const mountedSource =
               replaced && previous.metadata !== 'manual'
                 ? item.source
@@ -246,7 +250,7 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
                     playlistIssue: item.source.playlistIssue,
                     revision: item.source.revision,
                     unsupportedReason: item.source.unsupportedReason,
-                    ...(replaced ? { identification: undefined } : {}),
+                    ...(replaced || staleIdentification ? { identification: undefined } : {}),
                   }
             transaction
               .update(romTable)

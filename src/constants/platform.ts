@@ -428,7 +428,7 @@ const basePlatformMap = {
   vb: {
     cores: ['mednafen_vb'],
     displayNameI18nKey: 'platform.virtualBoy',
-    fileExtensions: ['.vb', '.vboy', '.zip'],
+    fileExtensions: ['.vb', '.vboy', '.bin', '.zip'],
     info: {
       developer: 'Nintendo',
       manufacturer: 'Nintendo',
