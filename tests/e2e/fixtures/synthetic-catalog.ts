@@ -6,6 +6,31 @@ export const catalogTitles = {
   sequel: 'Circuit Lantern II (Europe) (Rev 1)',
 }
 
+export const atariCatalogTitles = {
+  alternate: 'Copper Circuit (USA) (Rev B)',
+  current: 'Copper Circuit (USA) (Rev A)',
+  other: 'Copper Circuit (Europe)',
+}
+
+export const atariProviderMetadata = {
+  launchbox: {
+    databaseId: 7800,
+    developer: 'Fixture Works',
+    genres: 'Puzzle;Arcade',
+    maxPlayers: 2,
+    name: 'Copper Circuit',
+    overview: 'A synthetic copper-track puzzle for the Atari 7800.',
+    publisher: 'Fixture Studio',
+    releaseDate: '1990-07-23',
+    videoUrl: 'https://www.youtube.com/watch?v=RAfixture78',
+  },
+  libretro: {
+    id: 'synthetic-atari-7800-release',
+    name: atariCatalogTitles.current,
+    platform: 'Atari - 7800',
+  },
+}
+
 function packValue(value: number | string) {
   if (typeof value === 'number') {
     const bytes = Buffer.from([0xcd, 0, 0])
@@ -29,6 +54,11 @@ function packRecord(record: Record<string, number | string>) {
 
 const catalogRecords = {
   arcade: [{ name: 'Lantern’s Circuit (World)', rom_name: 'lntrn.zip' }],
+  atari7800: [
+    { name: atariCatalogTitles.current, releaseyear: 1990 },
+    { name: atariCatalogTitles.alternate, releaseyear: 1991 },
+    { developer: 'A different studio', name: atariCatalogTitles.other, releaseyear: 1992 },
+  ],
   n64: [{ name: catalogTitles.n64, releaseyear: 1998, rom_name: 'lantern64.z64' }],
   nes: [
     { name: catalogTitles.original, releaseyear: 1993, rom_name: 'lantern.nes' },

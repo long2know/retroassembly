@@ -22,7 +22,13 @@ import { createMountedLibrary } from '#@/utils/server/mounted-library.ts'
 import { enrichMountedRom, getMountedCoverUrl } from '#@/utils/server/mounted-metadata.ts'
 import { createStorage } from '#@/utils/server/storage.ts'
 import { createSupabase } from '#@/utils/server/supabase.ts'
-import { catalogTitles, syntheticCatalog, syntheticCover } from '../e2e/fixtures/synthetic-catalog.ts'
+import {
+  atariCatalogTitles,
+  atariProviderMetadata,
+  catalogTitles,
+  syntheticCatalog,
+  syntheticCover,
+} from '../e2e/fixtures/synthetic-catalog.ts'
 
 const matchesSchema = z.object({
   candidates: z.array(
@@ -140,6 +146,204 @@ async function assertArtwork(pending: Promise<Response>, artwork: string) {
 function digest(data: Uint8Array) {
   return createHash('sha256').update(data).digest('hex')
 }
+
+function nonArtworkFields(rom: typeof romTable.$inferSelect) {
+  assert.ok(rom.mountedSource)
+  return {
+    ...rom,
+    gameBoxartFileIds: null,
+    mountedSource: {
+      ...rom.mountedSource,
+      artwork: undefined,
+      artworkAttemptedAt: undefined,
+      artworkError: undefined,
+      artworkMatch: undefined,
+      artworkTarget: undefined,
+    },
+    updatedAt: undefined,
+  }
+}
+
+await it('repairs Atari 7800 cover art without changing an enriched release or its video', async (t) => {
+  const relative = 'atari7800/Synthetic cartridge.a78'
+  const f = await setup(t, { [relative]: 'Synthetic Atari 7800 payload' })
+  const [row] = f.library.select().from(romTable).all()
+  const sourceFile = path.join(f.roms, relative)
+  const sourceBytes = await readFile(sourceFile)
+  const md5 = createHash('md5').update(sourceBytes).digest('hex')
+  const provider = { ...atariProviderMetadata, libretro: { ...atariProviderMetadata.libretro, md5 } }
+  const titleRequests: string[] = []
+  let altVariant = 1
+  let race = false
+  mockProvider(t, (url, init) => {
+    assert.equal(init?.redirect, 'error')
+    if (url.origin === 'https://metadata.fixture.invalid') {
+      return Response.json([provider])
+    }
+    if (url.origin === 'https://raw.githubusercontent.com') {
+      assert.ok(decodeURIComponent(url.pathname).endsWith('/Atari - 7800.rdb'))
+      return new Response(syntheticCatalog('atari7800'), { headers: { 'Content-Type': 'application/octet-stream' } })
+    }
+    assert.ok(['https://thumbnails.libretro.com', 'https://cdn.jsdelivr.net'].includes(url.origin))
+    const title = decodeURIComponent(url.pathname).split('/').at(-1) || ''
+    titleRequests.push(title)
+    if (title === `${atariCatalogTitles.alternate}.png`) {
+      if (race) {
+        const { mountedSource } = f.byId(row.id)
+        assert.ok(mountedSource)
+        f.library
+          .update(romTable)
+          .set({
+            gameDescription: 'A newer manual synopsis',
+            mountedSource: { ...mountedSource, manualMetadataFields: ['gameDescription'] },
+          })
+          .where(eq(romTable.id, row.id))
+          .run()
+      }
+      return new Response(syntheticCover(altVariant), { headers: { 'Content-Type': 'image/png' } })
+    }
+    if (title === `${atariCatalogTitles.other}.png`) {
+      return new Response('Synthetic provider failure', { status: 503 })
+    }
+    return new Response(null, { status: 404 })
+  })
+  await enrichMountedRom(f.library, row)
+  await f.library
+    .update(romTable)
+    .set({
+      gameRating: 4,
+      gameThumbnailFileIds: 'attachments/fixture/personal.png',
+    })
+    .where(eq(romTable.id, row.id))
+  const before = f.byId(row.id)
+  assert.deepEqual(before.rawGameMetadata, provider)
+  assert.equal(before.mountedSource?.identification?.confidence, 'content')
+  assert.equal(before.gameBoxartFileIds, null)
+  const endpoint = `${row.id}/match`
+  async function search() {
+    const response = await f.request(`${endpoint}?query=copper`)
+    return matchesSchema.parse(await response.json())
+  }
+  async function choose(title: string) {
+    const results = await search()
+    const candidate = results.candidates.find(({ name }) => name === title)
+    assert.ok(candidate)
+    return { candidateId: candidate.id, snapshot: results.snapshot }
+  }
+  const selection = await choose(atariCatalogTitles.alternate)
+  assert.deepEqual(f.byId(row.id), before, 'preview does not edit provider metadata')
+  await f.request(endpoint, post({ ...selection, intent: 'unknown' }), 400)
+  await assertArtwork(f.request(endpoint, post({ ...selection, intent: 'cover' })), 'ready')
+  const covered = f.byId(row.id)
+  assert.deepEqual(nonArtworkFields(covered), nonArtworkFields(before))
+  assert.ok(covered.gameBoxartFileIds)
+  assert.deepEqual(await readFile(path.join(f.storage, covered.gameBoxartFileIds)), syntheticCover())
+
+  titleRequests.length = 0
+  altVariant = 2
+  await assertArtwork(f.request(`${row.id}/retry-artwork`, post()), 'ready')
+  const refreshed = f.byId(row.id)
+  assert.deepEqual(nonArtworkFields(refreshed), nonArtworkFields(before))
+  assert.deepEqual(titleRequests, [`${atariCatalogTitles.alternate}.png`])
+  assert.ok(refreshed.gameBoxartFileIds)
+  assert.notEqual(refreshed.gameBoxartFileIds, covered.gameBoxartFileIds)
+  assert.deepEqual(await readFile(path.join(f.storage, refreshed.gameBoxartFileIds)), syntheticCover(2))
+  await enrichMountedRom(f.library, refreshed)
+  const afterEnrichment = f.byId(row.id)
+  assert.equal(afterEnrichment.gameBoxartFileIds, refreshed.gameBoxartFileIds)
+  assert.deepEqual(afterEnrichment.mountedSource?.artworkMatch, covered.mountedSource?.artworkMatch)
+  assert.deepEqual(titleRequests, [`${atariCatalogTitles.alternate}.png`])
+
+  for (const [title, outcome] of [
+    [atariCatalogTitles.current, 'missing'],
+    [atariCatalogTitles.other, 'error'],
+  ]) {
+    const rejectedAlternative = await choose(title)
+    await assertArtwork(f.request(endpoint, post({ ...rejectedAlternative, intent: 'cover' })), outcome)
+    assert.deepEqual(
+      f.byId(row.id),
+      afterEnrichment,
+      'an unsuccessful alternate cover must not update the row or target',
+    )
+  }
+
+  const pending = await choose(atariCatalogTitles.alternate)
+  process.env.RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED = 'false'
+  const requestsBefore = titleRequests.length
+  await assertProblem(f.request(endpoint, post({ ...pending, intent: 'cover' }), 403), 'metadata-policy')
+  assert.equal(titleRequests.length, requestsBefore)
+  process.env.RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED = 'true'
+
+  race = true
+  await assertProblem(f.request(endpoint, post({ ...pending, intent: 'cover' }), 409), 'metadata-stale')
+  const newer = f.byId(row.id)
+  assert.equal(newer.gameDescription, 'A newer manual synopsis')
+  assert.deepEqual(newer.rawGameMetadata, provider)
+  assert.equal(newer.gameBoxartFileIds, refreshed.gameBoxartFileIds)
+  await assertProblem(f.request(endpoint, post({ ...pending, intent: 'cover' }), 409), 'metadata-stale')
+  await f.request(`${row.id}/boxart`, { method: 'DELETE' })
+  const removed = f.byId(row.id)
+  const afterRemoval = await choose(atariCatalogTitles.alternate)
+  const afterRace = titleRequests.length
+  await assertArtwork(f.request(endpoint, post({ ...afterRemoval, intent: 'cover' })), 'manual')
+  assert.deepEqual(f.byId(row.id), removed)
+  const upload = new FormData()
+  upload.set('file', new File([syntheticCover()], 'custom.png', { type: 'image/png' }))
+  await f.request(`${row.id}/boxart`, { body: upload, method: 'POST' })
+  const custom = f.byId(row.id)
+  assert.match(custom.gameBoxartFileIds || '', /^attachments\//u)
+  const afterUpload = await choose(atariCatalogTitles.alternate)
+  await assertArtwork(f.request(endpoint, post({ ...afterUpload, intent: 'cover' })), 'manual')
+  assert.deepEqual(f.byId(row.id), custom)
+  assert.equal(titleRequests.length, afterRace)
+  assert.deepEqual(await readFile(sourceFile), sourceBytes)
+})
+
+await it('keeps scraped details for the same canonical release, not merely the same display title', async (t) => {
+  const f = await setup(t, { 'atari7800/Fixture.a78': 'Synthetic Atari 7800 payload' })
+  const [row] = f.library.select().from(romTable).all()
+  mockProvider(t, (url) => {
+    if (url.origin === 'https://metadata.fixture.invalid') {
+      return Response.json([atariProviderMetadata])
+    }
+    if (url.origin === 'https://raw.githubusercontent.com') {
+      return new Response(syntheticCatalog('atari7800'), { headers: { 'Content-Type': 'application/octet-stream' } })
+    }
+    return new Response(null, { status: 404 })
+  })
+  const identified = await enrichMountedRom(f.library, row)
+  const endpoint = `${row.id}/match`
+  async function selectRelease(title: string) {
+    const response = await f.request(`${endpoint}?query=copper`)
+    const preview = matchesSchema.parse(await response.json())
+    const candidate = preview.candidates.find(({ name }) => name === title)
+    assert.ok(candidate)
+    await assertArtwork(f.request(endpoint, post({ candidateId: candidate.id, snapshot: preview.snapshot })), 'missing')
+    return f.byId(row.id)
+  }
+
+  const same = await selectRelease(atariCatalogTitles.current)
+  assert.equal(same.gameName, atariCatalogTitles.current)
+  assert.equal(same.gameDescription, atariProviderMetadata.launchbox.overview)
+  assert.deepEqual(same.rawGameMetadata, identified.rawGameMetadata)
+  assert.equal(same.launchboxGameId, identified.launchboxGameId)
+  assert.equal(same.libretroGameId, identified.libretroGameId)
+  assert.deepEqual(same.gameReleaseDate, identified.gameReleaseDate)
+  assert.deepEqual(same.mountedSource?.identification, identified.mountedSource?.identification)
+  const manual = new FormData()
+  manual.set('gamePublisher', 'My curated publisher')
+  await f.request(row.id, { body: manual, method: 'PATCH' })
+
+  const other = await selectRelease(atariCatalogTitles.other)
+  assert.equal(other.gameDeveloper, 'A different studio')
+  assert.equal(other.gameName, atariCatalogTitles.other)
+  assert.equal(other.gamePublisher, 'My curated publisher')
+  assert.equal(other.gameDescription, null)
+  assert.equal(other.gameReleaseDate, null)
+  assert.equal(other.launchboxGameId, null)
+  assert.equal(other.libretroGameId, null)
+  assert.equal(other.rawGameMetadata, null, 'a different regional release must not inherit the previous video')
+})
 
 await it('previews a scoped catalog without edits, confirms only the chosen title, and safely retries its artwork', async (t) => {
   const f = await setup(t, {
@@ -468,6 +672,7 @@ await it('uses only authorized legacy provider artwork, including title and game
   for (const rom of [
     { ...legacy, gameBoxartFileIds: 'attachments/fixture/manual.png' },
     { ...legacy, mountedSource: { ...source, artwork: 'manual' as const } },
+    { ...legacy, mountedSource: { ...source, artworkMatch: { name: 'Chosen cover' } } },
     { ...legacy, mountedSource: { ...source, catalogMatch: { id: 'another', name: 'Chosen title' } } },
     { ...legacy, gameName: 'Replaced by a new title' },
     { ...legacy, rawGameMetadata: null },

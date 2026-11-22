@@ -155,28 +155,38 @@ Authenticated API endpoints:
   an unavailable provider is `502`. PC Engine CD and SuperGrafx folder aliases
   return `422` rather than searching the PC Engine cartridge catalog. Search
   does not edit a game.
-- `POST /api/v1/roms/:id/match`: apply `{ "candidateId": "...", "snapshot": "..." }`
-  from a search on this game. The server resolves the ID in the game's platform
+- `POST /api/v1/roms/:id/match`: apply `{ "candidateId": "...", "snapshot": "...",
+  "intent": "cover" }` from a search on this game. Omit `intent` or use `"match"`
+  to apply the full match. The server resolves the ID in the game's platform
   catalog. An invalid candidate or stale game/source is `409`; search again
-  after reloading or rescanning as appropriate. A saved match can return
-  `artwork: "ready"`, `"missing"`, `"error"` or `"manual"` separately.
+  after reloading or rescanning as appropriate. The response reports
+  `artwork: "ready"`, `"missing"`, `"error"` or `"manual"`. A cover-only request
+  changes nothing unless the cover is ready.
 - `POST /api/v1/roms/:id/retry-artwork`: retry only this game's cover, using its
-  current match or title without re-identifying it. Returns the same cover
-  outcomes, or `"no-title"` when a match or title is needed first. Both repair
-  actions use the existing mounted edit authority; they do not require admin.
+  chosen cover if set, or its current match or title, without re-identifying
+  it. Returns the same cover outcomes, or `"no-title"` when a match or title
+  is needed first. Both repair actions use the existing mounted edit
+  authority; they do not require admin.
 - Existing ROM `PATCH`, artwork, favorites, history, and state APIs also work
   with mounted rows under the same authorization checks.
 
 Open a mounted game's details and choose **Find match** to search by title (or
 MAME set name). Review the candidates and choose the intended release. Titles
 include regions and revisions where available; an available year is shown
-without inventing a release date. The choice sets the title and preserves other
-manually edited fields. Freeform changes protect only the fields that actually
-changed (release dates are compared by UTC calendar day); a no-op does not
-change automatic enrichment. Older manual records without field tracking
-retain their existing fields. **Retry cover art** fetches only the cover.
-The media editor can upload custom cover art. An uploaded or removed cover is
-never replaced by either action.
+without inventing a release date. Choose **Use cover only** to try a candidate's
+cover without changing the game's title, description, videos, or other details.
+No cover or a provider error leaves the existing cover untouched. A successful
+choice is remembered by **Retry cover art**.
+
+Choose **Use full match** to set the title and update scraped details. An
+already confirmed catalog match or the exact Libretro release on the same
+platform preserves existing details and provider media. A different or
+unverified release discards the old scraped details and videos while
+preserving manually edited fields. Freeform changes protect only the
+fields that actually changed (release dates are compared by UTC calendar day);
+a no-op does not change automatic enrichment. Older manual records without
+field tracking retain their existing fields. The media editor can upload
+custom cover art. An uploaded or removed cover is never replaced by either action.
 Both actions are available with automatic metadata off, but respect the server
 network ceiling (`403`). Source bytes are immutable.
 
@@ -344,14 +354,15 @@ Artwork uses the canonical Libretro name, with a canonical LaunchBox title
 or arcade set name as applicable. For each name, an origin `404` tries a pinned
 jsDelivr mirror for the same system. Only all-`404` results are marked `missing`.
 HTTP errors, timeouts, redirects and unsafe media are marked `error`; a saved
-match remains saved. A changed match drops the old automatic cover if no
-replacement is available. A failed refresh for the same target keeps any
-existing cached cover. App-stored covers take priority. A previously identified
-mounted game may fall back to Libretro box art, title screens, or gameplay
-screenshots for its existing provider identity only while both the server
-network policy and automatic metadata are enabled. A custom or removed cover,
-an edited title no longer matching that identity, and a new catalog selection
-do not use the old browser cover fallbacks.
+match remains saved. A changed full match drops the old automatic cover if no
+replacement is available. An unsuccessful cover-only choice or a failed refresh
+for the same target keeps any existing cached cover. App-stored covers take
+priority. A previously identified mounted game may fall back to Libretro box
+art, title screens, or gameplay screenshots for its existing provider identity
+only while both the server network policy and automatic metadata are enabled.
+A custom or removed cover,
+an edited title no longer matching that identity, and an explicit catalog
+cover or full match do not use the old browser cover fallbacks.
 Cached covers persist below `storage/metadata/`; manually supplied art below
 `storage/attachments/`. Source folders receive no index, image or digest sidecars.
 
@@ -365,9 +376,11 @@ No media or index sidecars are created beside ROMs/BIOS.
 ```sh
 pnpm build
 pnpm exec playwright install chromium --only-shell
-pnpm exec playwright test -c tests/e2e/mounted-metadata-repair.config.ts
+pnpm exec playwright test -c tests/e2e/mounted-metadata-repair.config.ts --tsconfig=tests/e2e/tsconfig.playwright.json
 ```
 
 The spec starts a local production Node bundle on an ephemeral loopback port
 and uses synthetic mounted files and mocked provider responses at `/` and a
-nested base path. It does not need Docker, real ROMs, or a running deployment.
+nested base path. It verifies that repairing a cover leaves the Atari 7800
+fixture's synopsis, video and mounted ROM intact. It does not need Docker,
+real ROMs, or a running deployment.

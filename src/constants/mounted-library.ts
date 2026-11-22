@@ -93,6 +93,9 @@ export interface MountedMatchCandidate {
   year?: number
 }
 
+export const mountedMatchIntents = ['match', 'cover'] as const
+export type MountedMatchIntent = (typeof mountedMatchIntents)[number]
+
 export type MountedArtworkOutcome = 'ready' | 'missing' | 'error' | 'manual' | 'no-title'
 
 export interface MountedSource extends MountedMediaFile {
@@ -104,6 +107,7 @@ export interface MountedSource extends MountedMediaFile {
   artwork?: 'disabled' | 'pending' | 'ready' | 'missing' | 'error' | 'manual'
   artworkError?: string
   artworkAttemptedAt?: number
+  artworkMatch?: { name: string; shortName?: string }
   artworkTarget?: string
   catalogMatch?: { id: string; name: string; shortName?: string }
   manualMetadataFields?: MountedMetadataField[]

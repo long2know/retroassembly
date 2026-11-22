@@ -4,6 +4,7 @@ import type {
   MountedLibrarySettings,
   MountedLibraryStatus,
   MountedMatchCandidate,
+  MountedMatchIntent,
 } from '#@/constants/mounted-library.ts'
 import type { PlatformName } from '#@/constants/platform.ts'
 import type { romTable } from '#@/databases/schema.ts'
@@ -24,6 +25,7 @@ export interface MountedMetadataMatch {
 
 export interface MountedMatchSelection {
   candidateId: string
+  intent?: MountedMatchIntent
   snapshot: string
 }
 

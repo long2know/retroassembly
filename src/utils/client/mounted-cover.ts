@@ -19,6 +19,7 @@ export function getLegacyMountedCoverFallbacks(rom: CoverRom, automaticMetadataE
   if (
     !automaticMetadataEnabled ||
     !source?.available ||
+    source.artworkMatch ||
     source.catalogMatch ||
     source.artwork === 'manual' ||
     source.manualMetadataFields?.includes('gameName') ||
