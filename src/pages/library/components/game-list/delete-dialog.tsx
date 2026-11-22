@@ -6,22 +6,20 @@ import { useTranslation } from 'react-i18next'
 import { mutate } from 'swr'
 import useSWRMutation from 'swr/mutation'
 import { client } from '#@/api/client.ts'
-import { useSelectedGames } from '../../atoms.ts'
-import { useRoms } from '../../hooks/use-roms.ts'
 import { useRouter } from '../../hooks/use-router.ts'
 
 const { $delete } = client.roms
 
-export function DeleteDialog(props: Readonly<AlertDialog.RootProps>) {
+interface DeleteDialogProps extends AlertDialog.RootProps {
+  onDeleted: () => void
+  selectedGames: string[]
+}
+
+export function DeleteDialog({ onDeleted, selectedGames, ...props }: Readonly<DeleteDialogProps>) {
   const { onOpenChange } = props
   const { reload } = useRouter()
-  const { roms } = useRoms()
-  const [selectedGames, setSelectedGames] = useSelectedGames()
   const [clicked, setClicked] = useState(false)
   const { t } = useTranslation()
-  const mountedIds = new Set(roms.filter((rom) => rom.mountedSource).map(({ id }) => id))
-  const hasMountedGames = selectedGames.some((id) => mountedIds.has(id))
-  const hasPossiblyUploadedGames = selectedGames.some((id) => !mountedIds.has(id))
 
   const { isMutating, trigger } = useSWRMutation(
     { endpoint: 'roms', method: 'delete', query: { ids: selectedGames.join(',') } },
@@ -33,7 +31,7 @@ export function DeleteDialog(props: Readonly<AlertDialog.RootProps>) {
       async onSuccess() {
         closeDeleteDialog()
         await delay(500) // waiting for animation
-        setSelectedGames([])
+        onDeleted()
       },
     },
   )
@@ -63,9 +61,7 @@ export function DeleteDialog(props: Readonly<AlertDialog.RootProps>) {
           })}
         </AlertDialog.Title>
         <AlertDialog.Description className='leading-loose! whitespace-pre-line' size='2'>
-          {hasMountedGames ? t('mountedLibrary.confirmHide') : null}
-          {hasMountedGames && hasPossiblyUploadedGames ? '\n' : null}
-          {!hasMountedGames || hasPossiblyUploadedGames ? t('dialog.confirmDeleteRomsMessage') : null}
+          {t('dialog.confirmDeleteRomsMessage')}
         </AlertDialog.Description>
 
         <div className='mt-4 flex justify-end gap-3'>

@@ -1,6 +1,5 @@
 import type { MouseEvent, ReactNode } from 'react'
 import { getRomUrl } from '#@/pages/library/utils/rom.ts'
-import { useSelectedGames } from '../../atoms.ts'
 import { useIsDemo } from '../../hooks/use-demo.ts'
 import { FavoriteButton } from '../favorite-button.tsx'
 import { NavigatableLink } from '../navigatable-link.tsx'
@@ -9,19 +8,22 @@ import { GameEntryImage } from './game-entry-image.tsx'
 import { GamePlatform } from './game-platform.tsx'
 import { GameTitle } from './game-title.tsx'
 
-export function GameEntry({ actions, rom }: Readonly<{ actions?: ReactNode; rom: any }>) {
+interface GameEntryProps {
+  actions?: ReactNode
+  onSelectedChange?: (checked: boolean) => void
+  rom: any
+  selected?: boolean
+}
+
+export function GameEntry({ actions, onSelectedChange, rom, selected }: Readonly<GameEntryProps>) {
   const isDemo = useIsDemo()
 
-  const [selectedGames, setSelectedGames] = useSelectedGames()
-
   const url = getRomUrl(rom, isDemo)
-  const selecting = actions === undefined && selectedGames.length > 0
+  const selecting = selected !== undefined
   function handleClick(event: MouseEvent<HTMLAnchorElement>) {
     if (selecting) {
       event.preventDefault()
-      setSelectedGames(
-        selectedGames.includes(rom.id) ? selectedGames.filter((id) => id !== rom.id) : [...selectedGames, rom.id],
-      )
+      onSelectedChange?.(!selected)
     }
   }
 
@@ -53,7 +55,7 @@ export function GameEntry({ actions, rom }: Readonly<{ actions?: ReactNode; rom:
       {actions === undefined ? (
         <>
           {isDemo ? null : <FavoriteButton rom={rom} variant='overlay' />}
-          <GameEntryDropdownMenu rom={rom} />
+          <GameEntryDropdownMenu onSelectedChange={onSelectedChange} rom={rom} selected={selected} />
         </>
       ) : (
         actions

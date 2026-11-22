@@ -55,6 +55,47 @@ function inspectAppFile(container: string, fileId: string) {
   )
 }
 
+function seedLegacyHiddenRom(container: string, rom: Rom) {
+  const fixtureId = /^retro-web-5c9839ba-app-(?<id>[a-f0-9]{8})$/u.exec(container)?.groups?.id
+  if (!fixtureId) {
+    throw new Error('Refusing to inspect an unrecognized acceptance container')
+  }
+  const scope = execFileSync(
+    'docker',
+    [
+      'inspect',
+      '--format',
+      '{{index .Config.Labels "org.retro-web.project"}} {{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Type}} {{.Name}}{{end}}{{end}}',
+      container,
+    ],
+    { encoding: 'utf8' },
+  ).trim()
+  if (scope !== `5c9839ba volume retro-web-5c9839ba-data-${fixtureId}`) {
+    throw new Error('Refusing to seed a hidden ROM outside the isolated acceptance volume')
+  }
+  execFileSync(
+    'docker',
+    [
+      'exec',
+      '--user',
+      '1000:1000',
+      container,
+      'node',
+      '-e',
+      `const Database = require('better-sqlite3');
+      const db = new Database('/app/data/retroassembly.sqlite', { fileMustExist: true });
+      const result = db.prepare(\`UPDATE roms SET status = 0
+        WHERE id = ? AND file_id = ? AND file_name = 'Homebrew/Immutable Pulse.nes' AND platform = 'nes'
+        AND user_id IS NULL AND mounted_source IS NOT NULL AND status = 1\`).run(process.argv[1], process.argv[2]);
+      if (result.changes !== 1) throw new Error('Expected one visible synthetic mounted ROM');
+      db.close();`,
+      rom.id,
+      rom.fileId,
+    ],
+    { encoding: 'utf8' },
+  )
+}
+
 function providerMatches(providerContainer: string) {
   const logs = execFileSync('docker', ['logs', providerContainer], { encoding: 'utf8' }).trim()
   const records: { matched: boolean; method: string }[] = logs
@@ -611,15 +652,60 @@ test('mounted sources remain immutable through content matching, settings, brows
   })
   await settings.getByTitle('Close', { exact: true }).click()
   await page.goto(appPath('/library/roms'))
+  const game = page.locator('.game-entry').filter({ hasText: override })
+  await test.step('mounted ROMs cannot be deleted, but their private history can be', async () => {
+    await expect(game).toBeVisible()
+    await game.hover()
+    const gameMenus = page.locator('.game-entry').locator('..').getByRole('button', { exact: true, name: 'Menu' })
+    await expect(gameMenus).toHaveCount(0)
+    await expect(page.getByRole('button', { exact: true, name: 'Select all' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^Delete selected/u })).toHaveCount(0)
+
+    async function launchHistory() {
+      const response = await page.request.get(appPath('/api/v1/launch_records'))
+      expect(response.status(), await response.text()).toBe(200)
+      const history: { roms: { id: string }[] } = await response.json()
+      return history
+    }
+
+    const historyBefore = await launchHistory()
+    expect(historyBefore.roms.some((entry) => entry.id === rom.id)).toBe(true)
+    const mountedBefore = await findRom()
+    for (const endpoint of [`/api/v1/roms/${rom.id}`, `/api/v1/roms?ids=${rom.id},${archive.id}`]) {
+      const response = await page.request.delete(appPath(endpoint))
+      expect(response.status()).toBe(403)
+      expect(await response.json()).toEqual({ message: 'Mounted ROMs are read-only and cannot be deleted.' })
+    }
+    expect(await findRom()).toEqual(mountedBefore)
+    expect(await launchHistory()).toEqual(historyBefore)
+
+    const launch = await page.request.post(appPath('/api/v1/launch_records'), {
+      form: { core: 'fceumm', rom: archive.id },
+    })
+    expect(launch.status(), await launch.text()).toBe(200)
+    await page.goto(appPath('/library/history'))
+    const historyGame = page.locator('.game-entry').filter({ hasText: 'Archive Pulse — content metadata' })
+    await historyGame.hover()
+    await historyGame.locator('..').getByRole('button', { exact: true, name: 'Menu' }).click()
+    await expect(page.getByRole('menuitem', { exact: true, name: 'Delete the ROM' })).toHaveCount(0)
+    await page.getByRole('menuitem', { exact: true, name: 'Delete from history' }).click()
+    const historyDeletionPath = appPath(`/api/v1/roms/${archive.id}/launch_records`)
+    const deletion = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === historyDeletionPath && response.request().method() === 'DELETE',
+    )
+    await page.getByRole('alertdialog').getByRole('button', { exact: true, name: 'Delete' }).click()
+    const deleted = await deletion
+    expect(deleted.status()).toBe(200)
+    await expect(historyGame).toHaveCount(0)
+    expect(await launchHistory()).toEqual(historyBefore)
+    expect(await findArchive()).toMatchObject({ fileId: archive.fileId, id: archive.id })
+    await page.goto(appPath('/library/roms'))
+  })
   const restoreScreenshot =
-    await test.step('the administrator can restore a shared hide in Library settings', async () => {
-      const game = page.locator('.game-entry').filter({ hasText: override })
-      await game.hover()
-      await game.locator('..').getByRole('button', { exact: true, name: 'Menu' }).click()
-      await page.getByRole('menuitem', { exact: true, name: 'Delete the ROM' }).click()
-      const confirmation = page.getByRole('alertdialog')
-      await expect(confirmation).toContainText('An administrator can restore them in Library settings.')
-      await confirmation.getByRole('button', { exact: true, name: 'Delete' }).click()
+    await test.step('the administrator can restore a historically hidden ROM in Library settings', async () => {
+      seedLegacyHiddenRom(container, rom)
+      await page.reload()
       await expect(game).toHaveCount(0)
       const rescan = await page.request.post(appPath('/api/v1/mounted-library'))
       expect(rescan.status(), await rescan.text()).toBe(200)

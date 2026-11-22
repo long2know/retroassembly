@@ -1,11 +1,12 @@
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { getContext } from 'hono/context-storage'
+import { HTTPException } from 'hono/http-exception'
 import { isMountedFileId } from '#@/constants/mounted-library.ts'
 import { launchRecordTable, romTable, statusEnum } from '#@/databases/schema.ts'
 import { requireEditableRom } from '#@/utils/server/rom-access.ts'
 
 export async function deleteRoms(ids: string[]) {
-  const { currentUser, db, storage } = getContext().var
+  const { currentUser, db, storage, t } = getContext().var
   const { library } = db
 
   if (ids.length === 0) {
@@ -13,19 +14,41 @@ export async function deleteRoms(ids: string[]) {
   }
 
   for (const id of ids) {
-    await requireEditableRom(id)
+    const rom = await requireEditableRom(id)
+    if (rom.mountedSource) {
+      throw new HTTPException(403, { message: t('error.mountedRomReadOnly') })
+    }
   }
 
   const deletedRoms = await library
     .update(romTable)
     .set({ status: statusEnum.deleted })
-    .where(inArray(romTable.id, ids))
-    .returning({ fileId: romTable.fileId })
+    .where(
+      and(
+        inArray(romTable.id, ids),
+        eq(romTable.userId, currentUser.id),
+        eq(romTable.status, statusEnum.normal),
+        isNull(romTable.mountedSource),
+      ),
+    )
+    .returning({ fileId: romTable.fileId, id: romTable.id })
+
+  if (deletedRoms.length === 0) {
+    return
+  }
 
   await library
     .update(launchRecordTable)
     .set({ status: statusEnum.deleted })
-    .where(and(inArray(launchRecordTable.romId, ids), eq(launchRecordTable.userId, currentUser.id)))
+    .where(
+      and(
+        inArray(
+          launchRecordTable.romId,
+          deletedRoms.map(({ id }) => id),
+        ),
+        eq(launchRecordTable.userId, currentUser.id),
+      ),
+    )
 
   // Delete files that are no longer referenced
   const uniqueFileIds = [...new Set(deletedRoms.map((rom) => rom.fileId))]

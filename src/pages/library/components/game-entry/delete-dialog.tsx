@@ -6,28 +6,25 @@ import { useTranslation } from 'react-i18next'
 import { mutate } from 'swr'
 import useSWRMutation from 'swr/mutation'
 import { client } from '#@/api/client.ts'
-import type { MountedSource } from '#@/constants/mounted-library.ts'
-import { useGameActions } from '../../hooks/use-game-actions.ts'
 import { useRouter } from '../../hooks/use-router.ts'
 
 interface DeleteDialogProps extends AlertDialog.RootProps {
-  rom: { id: string; mountedSource?: MountedSource | null }
+  action: { confirmDescription: string; text: string; type: 'launch_records' | 'roms' }
+  romId: string
 }
 
 const { ':id': romsEndpoint } = client.roms
 
-export function DeleteDialog({ rom, ...props }: Readonly<DeleteDialogProps>) {
+export function DeleteDialog({ action, romId, ...props }: Readonly<DeleteDialogProps>) {
   const { t } = useTranslation()
   const { reload } = useRouter()
-  const { actions } = useGameActions()
-  const action = actions.find(({ name }) => name === 'delete')
-  const type = action?.type as 'launch_records' | 'roms'
+  const { type } = action
   const { $delete } = { launch_records: romsEndpoint.launch_records, roms: romsEndpoint }[type]
   const endpoint = { launch_records: 'roms/:id/launch_records', roms: 'roms' }[type]
 
   const [clicked, setClicked] = useState(false)
   const { isMutating, trigger } = useSWRMutation(
-    { endpoint, method: 'delete', param: { id: rom.id } },
+    { endpoint, method: 'delete', param: { id: romId } },
     ({ param }) => $delete({ param }),
     {
       onError() {
@@ -53,16 +50,12 @@ export function DeleteDialog({ rom, ...props }: Readonly<DeleteDialogProps>) {
     await mutate((key) => isPlainObject(key) && isMatch(key, { endpoint: 'roms/search' }), false)
   }
 
-  if (!action) {
-    return
-  }
-
   return (
     <AlertDialog.Root {...props}>
       <AlertDialog.Content maxWidth='450px'>
         <AlertDialog.Title>{action.text}</AlertDialog.Title>
         <AlertDialog.Description className='leading-loose! whitespace-pre-line' size='2'>
-          {type === 'roms' && rom.mountedSource ? t('mountedLibrary.confirmHide') : action.confirmDescription}
+          {action.confirmDescription}
         </AlertDialog.Description>
 
         <div className='mt-4 flex justify-end gap-3'>
