@@ -77,11 +77,13 @@ const romResponse = z.object({
   isFavorite: z.union([z.boolean(), z.number()]),
   mountedSource: z
     .object({
+      artwork: z.string().optional(),
       available: z.boolean(),
       metadata: z.string(),
       metadataError: z.string().optional(),
       path: z.string(),
       playlist: playlistResponse.optional(),
+      playlistIssue: z.object({ code: z.string(), line: z.number().optional() }).optional(),
       revision: z.string(),
       unsupportedReason: z.string().optional(),
     })
@@ -1413,25 +1415,89 @@ await describe('mounted shared library', async () => {
     assert.equal(await readFile(path.join(f.storage, ownRom.fileId), 'utf8'), 'owned upload bytes')
   })
 
-  await it('surfaces disc/playlist limits instead of launching incomplete dependencies', async (t) => {
+  await it('refreshes legacy PlayStation PBP guidance only after a complete scan without enabling launch', async (t) => {
     const f = await fixture(t, {
-      'roms/PSX/Disc One/game.cue': 'FILE "track.bin" BINARY',
-      'roms/PSX/game.chd': 'synthetic CHD',
+      'roms/PSX/First.chd': 'synthetic first CHD',
+      'roms/PSX/Game.m3u': 'First.chd\nSecond.chd\n',
+      'roms/PSX/Legacy game.pbp': 'synthetic PBP',
+      'roms/PSX/Second.chd': 'synthetic second CHD',
     })
-    const list = await f.list()
-    const cue = list.roms.find((rom) => rom.fileName.endsWith('.cue'))
-    const chd = list.roms.find((rom) => rom.fileName.endsWith('.chd'))
-    assert.match(cue?.mountedSource?.unsupportedReason || '', /disc\/playlist format is not supported/u)
-    assert.equal(chd?.mountedSource?.unsupportedReason, undefined)
-    const form = new FormData()
-    form.set('core', 'pcsx_rearmed')
-    assert.ok(cue)
-    form.set('rom', cue.id)
-    const launch = await f.request('/launch_records', { body: form, method: 'POST' })
-    assert.equal(launch.status, 422)
-    assert.match(await launch.text(), /disc\/playlist format is not supported/u)
-    assert.equal(getMountedFormat('psx', '.iso')?.supported, false)
-    assert.equal(getMountedFormat('psx', '.bin')?.supported, false)
+    const before = await sourceSnapshot(f.roms)
+    const roms = f.library.select().from(romTable).all()
+    const pbp = roms.find(({ fileName }) => fileName === 'Legacy game.pbp')
+    const chd = roms.find(({ fileName }) => fileName === 'First.chd')
+    const playlist = roms.find(({ fileName }) => fileName === 'Game.m3u')
+    assert.ok(pbp?.mountedSource && chd && playlist?.mountedSource?.playlist)
+    const legacyReason =
+      'This mounted disc/playlist format is not supported by this browser integration. CUE/M3U dependencies are not loaded. PlayStation currently requires a standalone CHD. No source conversion is performed.'
+    const manual = {
+      gameBoxartFileIds: 'attachments/alice/legacy-cover.png',
+      gameDescription: 'My description',
+      gameName: 'My title',
+    }
+    await writeFixture(f.storage, manual.gameBoxartFileIds, 'app-owned artwork')
+    await f.library
+      .update(romTable)
+      .set({
+        ...manual,
+        mountedSource: { ...pbp.mountedSource, artwork: 'manual', metadata: 'manual', unsupportedReason: legacyReason },
+      })
+      .where(eq(romTable.id, pbp.id))
+
+    function launch(id: string) {
+      const body = new FormData()
+      body.set('core', 'pcsx_rearmed')
+      body.set('rom', id)
+      return f.request('/launch_records', { body, method: 'POST' })
+    }
+
+    const readDirectory = fs.readdir
+    const interruptedTraversal = t.mock.method(
+      fs,
+      'readdir',
+      async function read(...args: Parameters<typeof readDirectory>) {
+        if (args[0] === f.bios) {
+          throw new Error('Fixture BIOS traversal interrupted')
+        }
+        return await readDirectory(...args)
+      },
+    )
+    syncBuiltinESMExports()
+    try {
+      await expectStatus(f.request('/mounted-library', { method: 'POST' }), 503)
+      const stale = await expectStatus(launch(pbp.id), 422)
+      assert.deepEqual(await stale.json(), { message: legacyReason })
+    } finally {
+      interruptedTraversal.mock.restore()
+      syncBuiltinESMExports()
+    }
+
+    await expectStatus(f.request('/mounted-library', { method: 'POST' }), 200)
+    const currentReason =
+      'This mounted disc/playlist format is not supported. For PlayStation, use a standalone CHD or an M3U listing only CHDs. No source conversion is performed.'
+    const detail = await expectStatus(f.request(`/roms/${pbp.id}`), 200)
+    const refreshed = romResponse.extend({ gameDescription: z.string() }).parse(await detail.json())
+    assert.equal(refreshed.mountedSource?.unsupportedReason, currentReason)
+    assert.equal(refreshed.mountedSource.revision, pbp.mountedSource.revision)
+    assert.equal(refreshed.mountedSource.metadata, 'manual')
+    assert.equal(refreshed.mountedSource.artwork, 'manual')
+    assert.equal(refreshed.id, pbp.id)
+    assert.equal(refreshed.fileId, pbp.fileId)
+    assert.equal(refreshed.gameName, manual.gameName)
+    assert.equal(refreshed.gameDescription, manual.gameDescription)
+    assert.equal(refreshed.gameBoxartFileIds, manual.gameBoxartFileIds)
+    assert.equal(await readFile(path.join(f.storage, manual.gameBoxartFileIds), 'utf8'), 'app-owned artwork')
+    const blocked = await expectStatus(launch(pbp.id), 422)
+    assert.deepEqual(await blocked.json(), { message: currentReason })
+    await expectStatus(launch(chd.id), 200)
+    await expectStatus(launch(playlist.id), 200)
+    const discUrl = `/roms/${playlist.id}/discs/2?revision=${playlist.mountedSource.playlist.revision}`
+    const disc = await expectStatus(f.request(discUrl), 200)
+    assert.equal(await disc.text(), 'synthetic second CHD')
+    assert.deepEqual(await sourceSnapshot(f.roms), before)
+    for (const extension of ['.bin', '.cue', '.iso', '.m3u8']) {
+      assert.equal(getMountedFormat('psx', extension)?.supported, false, extension)
+    }
     assert.equal(resolveMountedPlatform('shadps4'), undefined)
   })
 
@@ -1468,6 +1534,15 @@ await describe('mounted shared library', async () => {
       ),
       'roms/ps1/Campaign/Too many.m3u': Array.from({ length: 9 }, (_, i) => `Parts/Limited ${i}.chd`).join('\n'),
     })
+    const [missing] = await f.library
+      .select()
+      .from(romTable)
+      .where(eq(romTable.fileId, getMountedFileId('roms', 'ps1/Campaign/missing.m3u')))
+    assert.ok(missing.mountedSource)
+    await f.library
+      .update(romTable)
+      .set({ mountedSource: { ...missing.mountedSource, playlistIssue: undefined } })
+      .where(eq(romTable.id, missing.id))
     await symlink(path.join(f.roms, 'psx/Outside.chd'), path.join(f.roms, 'ps1/Campaign/Link.chd'))
     const before = await sourceSnapshot(f.roms)
     const scanned = await f.mounted.scan()
@@ -1485,6 +1560,8 @@ await describe('mounted shared library', async () => {
       assert.match(source?.unsupportedReason || '', reason, name)
       assert.equal(source?.playlist, undefined, name)
     }
+    const missingDisc = roms.find(({ id }) => id === missing.id)?.mountedSource
+    assert.deepEqual(missingDisc?.playlistIssue, { code: 'Missing', line: 2 })
     for (const [name, reason] of [
       ['Campaign/Bad UTF-8.m3u', /UTF-8/u],
       ['Campaign/Large.m3u', /64 KiB/u],

@@ -160,9 +160,11 @@ or the feature is disabled.
 
 Supported standalone extensions remain the upstream platform lists (including
 standalone PlayStation CHD). Mounted PlayStation `.m3u` playlists are supported
-as described below. CUE, ISO, M3U8, mixed-format playlists and playlists for
-other systems are not playable. The scanner shows why a recognized format or
-playlist is unsupported; it never converts source files.
+as described below. CUE/BIN disc sets, ISO, PBP, M3U8, mixed-format playlists and
+playlists for other systems are not playable. The scanner shows why a
+recognized format or playlist is unsupported; it never converts source files.
+After an upgrade, run **Scan ROM folders** to refresh this guidance for
+unchanged entries.
 Archive/core/ROM-set compatibility is still the upstream browser runtime’s
 responsibility; indexing a supported extension is not a compatibility guarantee.
 
