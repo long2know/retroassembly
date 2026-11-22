@@ -30,7 +30,7 @@ export function GameInfo({ rom }: Readonly<{ rom: Rom }>) {
           <span className='ml-1.5 text-xs opacity-50'>{formatDateRelative(releaseDate)}</span>
         </>
       ) : (
-        unknown
+        (rom.mountedSource?.catalogMatch && rom.gameReleaseYear) || unknown
       ),
     },
     {

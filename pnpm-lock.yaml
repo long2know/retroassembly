@@ -178,6 +178,9 @@ importers:
       hono:
         specifier: 4.13.13
         version: 4.13.13
+      libretrodb:
+        specifier: 1.0.0
+        version: 1.0.0
       openid-client:
         specifier: 6.8.8
         version: 6.8.8
@@ -4085,6 +4088,9 @@ packages:
     resolution: {integrity: sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==}
     engines: {node: '>=6'}
 
+  libretrodb@1.0.0:
+    resolution: {integrity: sha512-o8WJ5iR2nyA7JOVZT/HV0xHp+paHw1jqjLMc875HQrYVEP4GaQS0ZlzGNunOjSth0hdUpV+X8YD8L3/cUsx6Eg==}
+
   lightningcss-android-arm64@1.32.0:
     resolution: {integrity: sha512-YK7/ClTt4kAK0vo6w3X+Pnm0D2cf2vPHbhOXdoNti1Ga0al1P4TBZhwjATvjNwLEBCnKvjJc2jQgHXH0NEwlAg==}
     engines: {node: '>= 12.0.0'}
@@ -7832,6 +7838,8 @@ snapshots:
       graceful-fs: 4.2.11
 
   kleur@4.1.5: {}
+
+  libretrodb@1.0.0: {}
 
   lightningcss-android-arm64@1.32.0:
     optional: true

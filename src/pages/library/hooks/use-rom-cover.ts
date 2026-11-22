@@ -1,5 +1,5 @@
 import { uniq } from 'es-toolkit'
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useMemo, useRef } from 'react'
 import useSWRImmutable from 'swr/immutable'
 import type { Rom } from '#@/controllers/roms/get-roms.ts'
 import { imageLoaded } from '#@/utils/client/image.ts'
@@ -9,16 +9,14 @@ import {
   getPlatformGameIcon,
   getRomLibretroThumbnail,
 } from '#@/utils/client/library.ts'
+import { getLegacyMountedCoverFallbacks, libretroCoverTypes } from '#@/utils/client/mounted-cover.ts'
 import { getFileUrl } from '../utils/file.ts'
 import { useIsDemo } from './use-demo.ts'
 import { useMountedLibrary } from './use-mounted-library.ts'
 
-const libretroThumbnailTypes = ['boxart', 'title', 'snap'] as const
 export function useRomCover(rom: Rom) {
   const isDemo = useIsDemo()
   const { automaticMetadataEnabled } = useMountedLibrary()
-  const remoteCoversEnabled = !rom.mountedSource || automaticMetadataEnabled
-  const remoteCoversEnabledRef = useRef(remoteCoversEnabled)
   const cachedRomCovers = rom.gameBoxartFileIds
     ? rom.gameBoxartFileIds
         .split(',')
@@ -26,21 +24,17 @@ export function useRomCover(rom: Rom) {
         .map((fileId) => getFileUrl(fileId))
     : []
 
-  useEffect(() => {
-    remoteCoversEnabledRef.current = remoteCoversEnabled
-    return () => {
-      remoteCoversEnabledRef.current = false
+  const remoteCovers = useMemo(() => {
+    if (rom.mountedSource) {
+      return getLegacyMountedCoverFallbacks(rom, automaticMetadataEnabled)
     }
-  }, [remoteCoversEnabled])
-
-  const romCovers = [...cachedRomCovers]
-  if (isDemo) {
-    romCovers.push(getDemoRomThumbnail(rom))
-  } else if (remoteCoversEnabled) {
-    romCovers.push(
-      ...libretroThumbnailTypes.map((type) => getRomLibretroThumbnail(rom, type, 'libretro')),
-      ...libretroThumbnailTypes.map((type) => getRomLibretroThumbnail(rom, type, 'jsdelivr')),
-      ...libretroThumbnailTypes.map((type) =>
+    if (isDemo) {
+      return [getDemoRomThumbnail(rom)]
+    }
+    return [
+      ...libretroCoverTypes.map((type) => getRomLibretroThumbnail(rom, type, 'libretro')),
+      ...libretroCoverTypes.map((type) => getRomLibretroThumbnail(rom, type, 'jsdelivr')),
+      ...libretroCoverTypes.map((type) =>
         getLibretroThumbnail({
           host: 'libretro',
           name: rom.fileName.split('/').at(-1)?.split('.')[0] || '',
@@ -48,7 +42,7 @@ export function useRomCover(rom: Rom) {
           type,
         }),
       ),
-      ...libretroThumbnailTypes.map((type) =>
+      ...libretroCoverTypes.map((type) =>
         getLibretroThumbnail({
           host: 'jsdelivr',
           name: rom.fileName.split('/').at(-1)?.split('.')[0] || '',
@@ -56,21 +50,29 @@ export function useRomCover(rom: Rom) {
           type,
         }),
       ),
-    )
-  }
-  const uniqueRomCovers = uniq(romCovers).filter(Boolean)
+    ]
+  }, [automaticMetadataEnabled, isDemo, rom])
+  const authorizedRemoteCovers = useRef(remoteCovers)
+  useLayoutEffect(() => {
+    authorizedRemoteCovers.current = remoteCovers
+    return () => {
+      authorizedRemoteCovers.current = []
+    }
+  }, [remoteCovers])
+
+  const uniqueRomCovers = uniq([...cachedRomCovers, ...remoteCovers]).filter(Boolean)
   const platformCover = getPlatformGameIcon(rom.platform)
   const covers = [...uniqueRomCovers, platformCover]
 
   return useSWRImmutable(covers, async () => {
     for (const romCover of uniqueRomCovers) {
       const cached = cachedRomCovers.includes(romCover)
-      if (!cached && !remoteCoversEnabledRef.current) {
+      if (!cached && !authorizedRemoteCovers.current.includes(romCover)) {
         continue
       }
       try {
         await imageLoaded(romCover)
-        if (cached || remoteCoversEnabledRef.current) {
+        if (cached || authorizedRemoteCovers.current.includes(romCover)) {
           return { src: romCover, type: 'rom' }
         }
       } catch {}

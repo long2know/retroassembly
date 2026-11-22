@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { flushSync } from 'react-dom'
 import scrollIntoView from 'smooth-scroll-into-view-if-needed'
 import useSWRImmutable from 'swr/immutable'
+import { useMountedLibrary } from '#@/pages/library/hooks/use-mounted-library.ts'
 import { useRom } from '#@/pages/library/hooks/use-rom.ts'
 import { getFileUrl } from '#@/pages/library/utils/file.ts'
 import { imageLoaded } from '#@/utils/client/image.ts'
@@ -16,10 +17,12 @@ import { getYouTubeThumbnailUrl } from './youtube-utils.ts'
 
 export function GameMedia() {
   const rom = useRom()
+  const { automaticMetadataEnabled } = useMountedLibrary()
+  const providerMetadata = !rom.mountedSource || automaticMetadataEnabled ? rom.rawGameMetadata : null
 
-  const video = rom?.rawGameMetadata?.launchbox?.videoUrl
-  const title = rom?.rawGameMetadata?.libretro ? getRomLibretroThumbnail(rom, 'title', 'libretro') : ''
-  const snap = rom?.rawGameMetadata?.libretro ? getRomLibretroThumbnail(rom, 'snap', 'libretro') : ''
+  const video = providerMetadata?.launchbox?.videoUrl
+  const title = providerMetadata?.libretro ? getRomLibretroThumbnail(rom, 'title', 'libretro') : ''
+  const snap = providerMetadata?.libretro ? getRomLibretroThumbnail(rom, 'snap', 'libretro') : ''
 
   const builtinImageUrls = [title, snap].filter(Boolean)
   const userMediaItems: MediaItem[] = rom.gameThumbnailFileIds

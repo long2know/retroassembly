@@ -27,6 +27,7 @@
   "dependencies": {
     "better-sqlite3": "13.0.3",
     "hono": "4.13.13",
+    "libretrodb": "1.0.0",
     "openid-client": "6.8.8"
   },
   "devDependencies": {
