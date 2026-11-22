@@ -22,7 +22,11 @@ export function useMountedLibrary({ poll = false }: Readonly<{ poll?: boolean }>
   return {
     ...result,
     automaticMetadataEnabled: Boolean(
-      mountedLibrary?.automaticMetadataEnabled && result.data?.automaticMetadataEnabled && !result.error,
+      env.RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED === 'true' &&
+      mountedLibrary?.automaticMetadataEnabled !== false &&
+      result.data?.networkAllowed &&
+      result.data?.automaticMetadataEnabled &&
+      !result.error,
     ),
     enabled,
   }

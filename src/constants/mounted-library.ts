@@ -72,6 +72,29 @@ export interface MountedPbpEndPatch {
   end: number
 }
 
+export const mountedMetadataFields = [
+  'gameDescription',
+  'gameDeveloper',
+  'gameGenres',
+  'gameName',
+  'gamePlayers',
+  'gamePublisher',
+  'gameReleaseDate',
+] as const
+
+export type MountedMetadataField = (typeof mountedMetadataFields)[number]
+
+export interface MountedMatchCandidate {
+  id: string
+  name: string
+  region?: string
+  revision?: string
+  shortName?: string
+  year?: number
+}
+
+export type MountedArtworkOutcome = 'ready' | 'missing' | 'error' | 'manual' | 'no-title'
+
 export interface MountedSource extends MountedMediaFile {
   available: boolean
   metadata: 'disabled' | 'pending' | 'ready' | 'error' | 'manual'
@@ -81,11 +104,18 @@ export interface MountedSource extends MountedMediaFile {
   artwork?: 'disabled' | 'pending' | 'ready' | 'missing' | 'error' | 'manual'
   artworkError?: string
   artworkAttemptedAt?: number
+  artworkTarget?: string
+  catalogMatch?: { id: string; name: string; shortName?: string }
+  manualMetadataFields?: MountedMetadataField[]
   identification?: MountedIdentification
   pbpEndPatch?: MountedPbpEndPatch
   playlist?: MountedPlaylist
   playlistIssue?: MountedPlaylistIssue
   unsupportedReason?: string
+}
+
+export function getMountedManualMetadataFields(source: MountedSource) {
+  return source.manualMetadataFields ?? (source.metadata === 'manual' ? mountedMetadataFields : [])
 }
 
 export const mountedFilePrefix = 'mounted/'
@@ -145,6 +175,11 @@ export function resolveMountedPlatform(directory: string) {
     return systemAliases[name]
   }
   return isPlatformName(name) ? name : undefined
+}
+
+export function hasMountedCatalogScope(platform: PlatformName, sourcePath: string) {
+  const system = sourcePath.split('/', 1)[0].toLowerCase()
+  return platform !== 'pcengine' || (system !== 'pcenginecd' && system !== 'supergrafx')
 }
 
 const knownRomExtensions = new Set([

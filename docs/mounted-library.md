@@ -148,13 +148,37 @@ Authenticated API endpoints:
   immediately; poll GET for progress. Client-supplied filesystem paths and
   provider URLs are not accepted.
 - `POST /api/v1/roms/:id/identify`: retry/match with JSON `{ "name": "Game name" }`,
-  or a `launchboxId`/`libretroId`. Provider failures are persisted and retryable.
+  or a `launchboxId`/`libretroId`. This remains the legacy single-result msleuth
+  endpoint; provider failures are persisted and retryable.
+- `GET /api/v1/roms/:id/match?query=...`: search the game's platform catalog for
+  up to 12 candidates. An empty list is a successful search with no matches;
+  an unavailable provider is `502`. PC Engine CD and SuperGrafx folder aliases
+  return `422` rather than searching the PC Engine cartridge catalog. Search
+  does not edit a game.
+- `POST /api/v1/roms/:id/match`: apply `{ "candidateId": "...", "snapshot": "..." }`
+  from a search on this game. The server resolves the ID in the game's platform
+  catalog. An invalid candidate or stale game/source is `409`; search again
+  after reloading or rescanning as appropriate. A saved match can return
+  `artwork: "ready"`, `"missing"`, `"error"` or `"manual"` separately.
+- `POST /api/v1/roms/:id/retry-artwork`: retry only this game's cover, using its
+  current match or title without re-identifying it. Returns the same cover
+  outcomes, or `"no-title"` when a match or title is needed first. Both repair
+  actions use the existing mounted edit authority; they do not require admin.
 - Existing ROM `PATCH`, artwork, favorites, history, and state APIs also work
   with mounted rows under the same authorization checks.
 
-Open a game’s metadata editor to change its name/details or search for a
-corrected identification name. The media editor stores custom art in app
-storage. Source bytes are immutable; app metadata is deliberately editable.
+Open a mounted game's details and choose **Find match** to search by title (or
+MAME set name). Review the candidates and choose the intended release. Titles
+include regions and revisions where available; an available year is shown
+without inventing a release date. The choice sets the title and preserves other
+manually edited fields. Freeform changes protect only the fields that actually
+changed (release dates are compared by UTC calendar day); a no-op does not
+change automatic enrichment. Older manual records without field tracking
+retain their existing fields. **Retry cover art** fetches only the cover.
+The media editor can upload custom cover art. An uploaded or removed cover is
+never replaced by either action.
+Both actions are available with automatic metadata off, but respect the server
+network ceiling (`403`). Source bytes are immutable.
 
 ## BIOS and browser format boundaries
 
@@ -260,7 +284,10 @@ Libretro MD5 matching followed by ROM-name, No-Intro/GoodTools-aware filename,
 and LaunchBox alternate-name matching. Normal cartridge files are hashed in
 bounded chunks. Non-arcade ZIPs are inspected through a random-access reader;
 only one safe, system-eligible cartridge payload is hashed, never compressed
-archive bytes or an arbitrary first entry. Directories, documentation and macOS
+archive bytes or an arbitrary first entry. The payload's basename is the first
+filename fallback after content MD5; the archive basename is tried only when
+that lookup finds no match. No mounted directory path is sent to the provider.
+Directories, documentation and macOS
 resource forks are excluded. Atari cartridge and Mega Drive `.bin` payloads are
 accepted according to their existing upstream cores. Arcade ZIPs remain complete
 sets: no member is chosen as the game's content identity. Set/core compatibility
@@ -296,21 +323,51 @@ least five minutes before periodic automatic retries. Turning automatic lookup
 off persists and prevents new automatic provider/cover work while preserving all
 cached/manual data. Explicit metadata/artwork actions still work when automatic
 lookup is off, unless the server environment network policy is disabled; that
-hard ceiling returns `403` for explicit provider actions. The loader exposes the
-same status snapshot as `mountedLibrary` for cached-only client initialization.
-The server environment flag remains the network ceiling, not the UI preference.
+hard ceiling returns `403` for explicit provider actions. The browser starts
+cached-only until it has status authorizing automatic requests; the authenticated
+status endpoint supplies that state when the page loader has no snapshot.
 
-Artwork first uses the provider's canonical Libretro name, then an available
-canonical LaunchBox title, without blindly stripping meaningful title text.
-An HTTP `404` persists `artwork: "missing"`, not a ROM-identification failure,
-and is not retried automatically on browsing or rescans. Other HTTP failures,
-timeouts and unsafe image responses persist `artwork: "error"` with the actual
-error/status; valid metadata remains ready. Some identified variants simply
-have no artwork, and a missing cover does not mean that a ROM is invalid.
+Explicit search reads the [Libretro database](https://github.com/libretro/libretro-database/tree/90601bff67dba7057381292f17e08ed2cecbd6dc)
+(CC BY-SA 4.0, Libretro database contributors) at a pinned revision using the
+MIT-licensed `libretrodb` parser. Only the platform's RDB is downloaded, with a
+10 MiB limit and a small in-memory cache. Arcade search uses MAME names and
+set names; a match is not a guarantee of emulator or ROM-set compatibility.
+Famicom/NES, Super Famicom/SNES, and Mega Drive/Genesis each share a cartridge
+catalog across regions; Famicom Disk System is separate. Game & Watch uses the
+Libretro handheld electronic game `.mgw` catalog. The recognized
+`pcenginecd`/`supergrafx` folder aliases are not part of the PC Engine cartridge
+picker scope.
+None of the catalog data is bundled. The search text, mounted paths and ROM
+bytes are not sent to the catalog host.
+
+Artwork uses the canonical Libretro name, with a canonical LaunchBox title
+or arcade set name as applicable. For each name, an origin `404` tries a pinned
+jsDelivr mirror for the same system. Only all-`404` results are marked `missing`.
+HTTP errors, timeouts, redirects and unsafe media are marked `error`; a saved
+match remains saved. A changed match drops the old automatic cover if no
+replacement is available. A failed refresh for the same target keeps any
+existing cached cover. App-stored covers take priority. A previously identified
+mounted game may fall back to Libretro box art, title screens, or gameplay
+screenshots for its existing provider identity only while both the server
+network policy and automatic metadata are enabled. A custom or removed cover,
+an edited title no longer matching that identity, and a new catalog selection
+do not use the old browser cover fallbacks.
 Cached covers persist below `storage/metadata/`; manually supplied art below
 `storage/attachments/`. Source folders receive no index, image or digest sidecars.
 
-Cover URLs are generated only for the existing Libretro thumbnail provider,
-never accepted as arbitrary host/file URLs. Redirects, non-image content types,
-and images larger than 10 MiB are rejected. No media or index sidecars are
-created beside ROMs/BIOS.
+Cover URLs use only the Libretro thumbnail origin and pinned mirrors, never an
+arbitrary host or file URL. Server-side cover caching rejects redirects,
+invalid image signatures or content types, and images larger than 10 MiB.
+No media or index sidecars are created beside ROMs/BIOS.
+
+### Focused production browser check
+
+```sh
+pnpm build
+pnpm exec playwright install chromium --only-shell
+pnpm exec playwright test -c tests/e2e/mounted-metadata-repair.config.ts
+```
+
+The spec starts a local production Node bundle on an ephemeral loopback port
+and uses synthetic mounted files and mocked provider responses at `/` and a
+nested base path. It does not need Docker, real ROMs, or a running deployment.

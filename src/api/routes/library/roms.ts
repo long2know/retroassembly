@@ -24,6 +24,15 @@ import { requireEditableRom, requireRom } from '#@/utils/server/rom-access.ts'
 import { createFileResponse } from '../utils.ts'
 import { inGameSave } from './in-game-save.ts'
 
+async function requireMountedMetadata(id: string) {
+  const rom = await requireEditableRom(id)
+  const library = getMountedLibrary()
+  if (!rom.mountedSource || !library) {
+    throw new HTTPException(400, { message: 'This metadata endpoint requires a mounted ROM' })
+  }
+  return { library, rom }
+}
+
 export const roms = new Hono()
   .route(':id/in-game-save', inGameSave)
   .get('', async (c) => c.json(await getRoms()))
@@ -70,12 +79,21 @@ export const roms = new Hono()
       const id = c.req.param('id')
       const dateFormat = preference.ui.dateFormat === 'auto' ? dateFormatMap[i18n.language] : preference.ui.dateFormat
       const gameReleaseDate = form.gameReleaseDate
-        ? DateTime.fromFormat(form.gameReleaseDate, dateFormat, { zone: 'utc' }).setZone('utc').toJSDate() || null
-        : null
+        ? DateTime.fromFormat(form.gameReleaseDate, dateFormat, { zone: 'utc' })
+        : undefined
+      let gamePlayers: number | null | undefined
+      if (form.gamePlayers !== undefined) {
+        const players = Number(form.gamePlayers)
+        gamePlayers = form.gamePlayers && Number.isFinite(players) ? Math.trunc(players) : null
+      }
+      let releaseDate: Date | null | undefined
+      if (form.gameReleaseDate !== undefined) {
+        releaseDate = gameReleaseDate?.isValid ? gameReleaseDate.toJSDate() : null
+      }
       const rom = {
         ...Object.fromEntries(Object.entries(form).map(([key, value]) => [key, value || null])),
-        gamePlayers: form.gamePlayers ? Math.trunc(Number(form.gamePlayers)) : null,
-        gameReleaseDate,
+        gamePlayers,
+        gameReleaseDate: releaseDate,
       }
 
       const ret = await updateRom({ id, ...rom })
@@ -201,6 +219,34 @@ export const roms = new Hono()
       return createFileResponse(file, `disc-${disc}.chd`, head)
     },
   )
+
+  .get(':id/match', zValidator('query', z.object({ query: z.string().trim().min(1).max(120) })), async (c) => {
+    c.header('Cache-Control', 'private, no-store')
+    const { library, rom } = await requireMountedMetadata(c.req.param('id'))
+    return c.json(await library.searchMatches(rom, c.req.valid('query').query))
+  })
+
+  .post(
+    ':id/match',
+    zValidator(
+      'json',
+      z
+        .object({
+          candidateId: z.string().regex(mountedRevisionPattern),
+          snapshot: z.string().regex(mountedRevisionPattern),
+        })
+        .strict(),
+    ),
+    async (c) => {
+      const { library, rom } = await requireMountedMetadata(c.req.param('id'))
+      return c.json(await library.applyMatch(rom, c.req.valid('json')))
+    },
+  )
+
+  .post(':id/retry-artwork', async (c) => {
+    const { library, rom } = await requireMountedMetadata(c.req.param('id'))
+    return c.json(await library.retryGameArtwork(rom))
+  })
 
   .post(
     ':id/identify',

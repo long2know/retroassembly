@@ -5,6 +5,7 @@ import { HTTPException } from 'hono/http-exception'
 import { getRunTimeEnv } from '#@/constants/env.ts'
 import {
   getMountedFormat,
+  hasMountedCatalogScope,
   isMountedPsxPbp,
   resolveMountedPlatform,
   type MountedLibrarySettings,
@@ -29,10 +30,12 @@ import {
 } from './mounted-files.ts'
 import {
   getMountedLibrary,
+  MountedRepairError,
   setMountedLibrary,
   type MountedBios,
   type MountedScanStatus,
   type MountedMetadataMatch,
+  type MountedMatchSelection,
   type PlaylistDiscRequest,
 } from './mounted-library-runtime.ts'
 import { inspectMountedPbp } from './mounted-pbp.ts'
@@ -63,6 +66,10 @@ function visibleMountedCondition(platform?: PlatformName) {
 
 function hiddenMountedCondition() {
   return and(eq(romTable.status, statusEnum.deleted), isNull(romTable.userId), isNotNull(romTable.mountedSource))
+}
+
+function matchSnapshot(rom: typeof romTable.$inferSelect) {
+  return createHash('sha256').update(JSON.stringify(rom)).digest('hex')
 }
 
 export function createMountedLibrary(library: Library, configuration: MountedConfiguration) {
@@ -534,6 +541,32 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
     )
   }
 
+  async function assertMetadataRepairSource(rom: typeof romTable.$inferSelect) {
+    if (!networkAllowed()) {
+      throw new MountedRepairError('metadata-policy')
+    }
+    const source = rom.mountedSource
+    if (!source?.available) {
+      throw new MountedRepairError('source-unavailable')
+    }
+    let info: Awaited<ReturnType<typeof getMountedFileInfo>>
+    try {
+      info = await getMountedFileInfo(configuration.roms, source.path)
+    } catch (error) {
+      throw new MountedRepairError('source-unavailable', error)
+    }
+    if (info.revision !== source.revision) {
+      throw new MountedRepairError('metadata-stale')
+    }
+  }
+
+  async function assertCatalogSource(rom: typeof romTable.$inferSelect) {
+    await assertMetadataRepairSource(rom)
+    if (rom.mountedSource && !hasMountedCatalogScope(rom.platform, rom.mountedSource.path)) {
+      throw new MountedRepairError('catalog-unsupported')
+    }
+  }
+
   function automaticMetadataEnabled() {
     return settings.automaticMetadata && networkAllowed()
   }
@@ -636,15 +669,19 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
           continue
         }
         try {
-          const updated =
-            operation === 'artwork'
-              ? await retryMountedArtwork(library, rom)
-              : await enrichMountedRom(library, rom, {
-                  allowArtwork: options.automatic ? automaticMetadataEnabled : undefined,
-                  retryArtwork: options.retryArtwork,
-                  root: configuration.roms,
-                })
-          if (updated.mountedSource?.artwork === 'error') {
+          let artwork: MountedSource['artwork']
+          if (operation === 'artwork') {
+            const result = await retryMountedArtwork(library, rom)
+            artwork = result.artwork === 'no-title' ? undefined : result.artwork
+          } else {
+            const result = await enrichMountedRom(library, rom, {
+              allowArtwork: options.automatic ? automaticMetadataEnabled : undefined,
+              retryArtwork: options.retryArtwork,
+              root: configuration.roms,
+            })
+            artwork = result.mountedSource?.artwork
+          }
+          if (artwork === 'error') {
             metadata.errors += 1
           }
         } catch (error) {
@@ -760,6 +797,19 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
   }
 
   return {
+    async applyMatch(rom: typeof romTable.$inferSelect, { candidateId, snapshot }: MountedMatchSelection) {
+      await assertCatalogSource(rom)
+      if (snapshot !== matchSnapshot(rom)) {
+        throw new MountedRepairError('metadata-stale')
+      }
+      const { getMountedCatalogEntry } = await import('./mounted-catalog.ts')
+      const entry = await getMountedCatalogEntry(rom.platform, candidateId)
+      const { selectMountedCatalogMatch } = await import('./mounted-metadata.ts')
+      return await selectMountedCatalogMatch(library, rom, {
+        assertCurrent: () => assertMetadataRepairSource(rom),
+        entry,
+      })
+    },
     assertPlaylistDiscCurrent,
     assertWritableDirectory,
     configuration,
@@ -790,8 +840,19 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
     retryArtwork(options: { platform?: PlatformName } = {}) {
       return startMetadataJob('artwork', options)
     },
+    async retryGameArtwork(rom: typeof romTable.$inferSelect) {
+      await assertMetadataRepairSource(rom)
+      const { retryMountedArtwork } = await import('./mounted-metadata.ts')
+      return await retryMountedArtwork(library, rom, () => assertMetadataRepairSource(rom))
+    },
     scan,
     scheduleEnrichment,
+    async searchMatches(rom: typeof romTable.$inferSelect, query: string) {
+      await assertCatalogSource(rom)
+      const { searchMountedCatalog } = await import('./mounted-catalog.ts')
+      const candidates = await searchMountedCatalog(rom.platform, query)
+      return { candidates, snapshot: matchSnapshot(rom) }
+    },
     start() {
       stopped = false
       scheduleEnrichment()

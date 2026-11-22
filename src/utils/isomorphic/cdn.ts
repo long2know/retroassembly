@@ -19,6 +19,7 @@ const repositoryVersions = {
   'libretro-thumbnails/Nintendo_-_Game_Boy': 'd963e89e95c1fe48df9fdb88ccb60f7d1ffc68d3', // https://github.com/libretro-thumbnails/Nintendo_-_Game_Boy/commits
   'libretro-thumbnails/Nintendo_-_Game_Boy_Advance': '1d180fd504e63eff98cb94653eff2ddcd5d03647', // https://github.com/libretro-thumbnails/Nintendo_-_Game_Boy_Advance/commits
   'libretro-thumbnails/Nintendo_-_Game_Boy_Color': '2c54e12ed7d9acd3124497bf5a9b107ab69d0d41', // https://github.com/libretro-thumbnails/Nintendo_-_Game_Boy_Color/commits
+  'libretro-thumbnails/Nintendo_-_Nintendo_64': 'ff0badea277f2d2d15e9008b04f1a0fd6abc40a3', // https://github.com/libretro-thumbnails/Nintendo_-_Nintendo_64/commits
   'libretro-thumbnails/Nintendo_-_Nintendo_Entertainment_System': '8cc31d11631684ea26e5e2c0d4d77d5f30651a1d', // https://github.com/libretro-thumbnails/Nintendo_-_Nintendo_Entertainment_System/commits
   'libretro-thumbnails/Nintendo_-_Super_Nintendo_Entertainment_System': '8ab381469ab76eb65d6db494fc6195a84c3ef4de', // https://github.com/libretro-thumbnails/Nintendo_-_Super_Nintendo_Entertainment_System/commits
   'libretro-thumbnails/Nintendo_-_Virtual_Boy': '75693093d5c9bce8fc61ec073877384c47c82cb6', // https://github.com/libretro-thumbnails/Nintendo_-_Virtual_Boy/commits
@@ -30,6 +31,7 @@ const repositoryVersions = {
   'libretro-thumbnails/Sega_-_SG-1000': '3a0e96504581c36cbb8a0d6860099565142ef7fd', // https://github.com/libretro-thumbnails/Sega_-_SG-1000/commits
   'libretro-thumbnails/SNK_-_Neo_Geo_Pocket': '3932af2130b55ae1d666632c79fc99515ed5438c', // https://github.com/libretro-thumbnails/SNK_-_Neo_Geo_Pocket/commits
   'libretro-thumbnails/SNK_-_Neo_Geo_Pocket_Color': '2b397b7b0a7e0056cfe787599578ddf8724f1859', // https://github.com/libretro-thumbnails/SNK_-_Neo_Geo_Pocket_Color/commits
+  'libretro-thumbnails/Sony_-_PlayStation': 'ccee75c7744d81676b6725307aca27ef6be6231a', // https://github.com/libretro-thumbnails/Sony_-_PlayStation/commits
   'libretro/docs': '35b22b41444b7d547d7f239669332c634acb455b', // https://github.com/libretro/docs/commits
   'libretro/retroarch-assets': '2d24ef2972a709f870cc3f73853158fa2376f37d', // https://github.com/libretro/retroarch-assets/commits
   'Mattersons/es-theme-neutral': 'c9b38e7265d680d3da68e96df1bc2ed1cfefb79f', // https://github.com/Mattersons/es-theme-neutral/commits
@@ -42,6 +44,10 @@ const repositoryVersions = {
 
 export const cdnHost = 'https://cdn.jsdelivr.net/'
 export const libretroThumbnailsHost = 'https://thumbnails.libretro.com/'
+
+function hasPinnedVersion(repo: string): repo is keyof typeof repositoryVersions {
+  return Object.hasOwn(repositoryVersions, repo)
+}
 
 export function getCDNUrl(repo: keyof typeof repositoryVersions, filePpath: string) {
   const [ghUser, ghRepoName] = repo.split('/')
@@ -57,4 +63,11 @@ export function getCDNUrl(repo: keyof typeof repositoryVersions, filePpath: stri
   const urlPath = urlPathSegments.join('/')
   url.pathname = urlPath
   return url.href
+}
+
+export function getPinnedLibretroThumbnailUrl(system: string, filename: string) {
+  const repo = `libretro-thumbnails/${system.replaceAll(' ', '_').replace(/\+$/u, '')}`
+  if (hasPinnedVersion(repo)) {
+    return new URL(getCDNUrl(repo, `Named_Boxarts/${encodeRFC3986URIComponent(filename)}`))
+  }
 }

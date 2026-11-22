@@ -61,6 +61,7 @@ import { cacheMountedCover, enrichMountedRom, getMountedCoverUrl } from '#@/util
 import { requireRom } from '#@/utils/server/rom-access.ts'
 import { createFilesystemStorage, createStorage } from '#@/utils/server/storage.ts'
 import { createSupabase } from '#@/utils/server/supabase.ts'
+import { syntheticCover } from '../e2e/fixtures/synthetic-catalog.ts'
 import { createSyntheticBatteryNesRom, createSyntheticNesRom } from '../e2e/fixtures/synthetic-nes.ts'
 import { createSyntheticPsxPbp } from '../e2e/fixtures/synthetic-psx.ts'
 
@@ -1375,7 +1376,7 @@ await describe('mounted shared library', async () => {
     process.env.RETROASSEMBLY_RUN_TIME_SHARED_ROM_METADATA_ENABLED = 'true'
     const [rom] = await f.library.select().from(romTable)
     const before = await sourceSnapshot(f.roms)
-    const imageBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+    const imageBytes = syntheticCover()
     const requests: URL[] = []
     t.mock.method(globalThis, 'fetch', (input) => {
       const url = getFetchUrl(input)
@@ -2171,7 +2172,7 @@ await describe('mounted shared library', async () => {
         const body = await getIdentifyInput(input, init)
         inputs.push(body)
         assert.equal(body.platform, 'nes')
-        assert.deepEqual(body.files, [{ md5, name: 'Circuit Lantern (Demo) [p1][!].zip' }])
+        assert.deepEqual(body.files, [{ md5, name: 'Inner Lantern.nes' }])
         return Response.json([
           {
             launchbox: { name: 'Circuit Lantern' },
@@ -2179,7 +2180,7 @@ await describe('mounted shared library', async () => {
           },
         ])
       }
-      assert.equal(url.origin, 'https://thumbnails.libretro.com')
+      assert.ok(['https://thumbnails.libretro.com', 'https://cdn.jsdelivr.net'].includes(url.origin))
       covers.push(url)
       return new Response('No artwork for this canonical name', { status: 404 })
     })
@@ -2199,7 +2200,7 @@ await describe('mounted shared library', async () => {
     assert.ok(identified.mountedSource?.identification?.hashedAt)
     assert.deepEqual(
       covers.map((url) => decodeURIComponent(url.pathname).split('/').at(-1)),
-      ['Circuit Lantern (World).png', 'Circuit Lantern.png'],
+      ['Circuit Lantern (World).png', 'Circuit Lantern (World).png', 'Circuit Lantern.png', 'Circuit Lantern.png'],
     )
     assert.deepEqual(await sourceSnapshot(f.roms), before)
     const detached = path.join(f.root, 'offline-source')
@@ -2209,7 +2210,7 @@ await describe('mounted shared library', async () => {
       assert.deepEqual(repeated.mountedSource?.identification, identified.mountedSource?.identification)
       assert.equal(repeated.mountedSource?.artworkAttemptedAt, identified.mountedSource?.artworkAttemptedAt)
       assert.equal(inputs.length, 2)
-      assert.equal(covers.length, 2)
+      assert.equal(covers.length, 4)
       const response = await expectStatus(f.request('/mounted-library'), 200)
       assert.equal(mountedStatusResponse.parse(await response.json()).indexed, 1)
     } finally {
@@ -2393,10 +2394,10 @@ await describe('mounted shared library', async () => {
           { libretro: { id: 'automatic-fixture', md5: body.files[0]?.md5, name: 'Automatic canonical (World)' } },
         ])
       }
-      assert.equal(url.origin, 'https://thumbnails.libretro.com')
+      assert.ok(['https://thumbnails.libretro.com', 'https://cdn.jsdelivr.net'].includes(url.origin))
       covers += 1
       return artworkAvailable
-        ? new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { headers: { 'Content-Type': 'image/png' } })
+        ? new Response(syntheticCover(), { headers: { 'Content-Type': 'image/png' } })
         : new Response('Missing art', { status: 404 })
     })
     const settings = await expectStatus(
@@ -2425,7 +2426,7 @@ await describe('mounted shared library', async () => {
     assert.equal(finished.metadata.errors, 0)
     assert.equal(finished.metadata.processed, 1)
     assert.equal(providers, 1)
-    assert.equal(covers, 1)
+    assert.equal(covers, 2)
     const [identified] = await f.library.select().from(romTable).where(eq(romTable.id, automatic.id))
     assert.equal(identified.mountedSource?.artwork, 'missing')
     const cached = identified.mountedSource?.identification
@@ -2434,7 +2435,7 @@ await describe('mounted shared library', async () => {
     await expectStatus(f.request('/mounted-library/artwork', action), 200)
     await finishMetadataJob(mounted)
     assert.equal(providers, 1)
-    assert.equal(covers, 2)
+    assert.equal(covers, 3)
     const [withArt] = await f.library.select().from(romTable).where(eq(romTable.id, automatic.id))
     assert.equal(withArt.mountedSource?.artwork, 'ready')
     assert.match(withArt.gameBoxartFileIds || '', /^metadata\//u)
@@ -2445,7 +2446,7 @@ await describe('mounted shared library', async () => {
     )
     await finishMetadataJob(mounted)
     assert.equal(providers, 2)
-    assert.equal(covers, 2)
+    assert.equal(covers, 3)
     await expectStatus(f.request('/mounted-library', { method: 'POST' }), 200)
     await delay(10)
     const [unchanged] = await f.library.select().from(romTable).where(eq(romTable.id, automatic.id))

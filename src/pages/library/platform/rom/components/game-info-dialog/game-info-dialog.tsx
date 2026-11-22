@@ -1,9 +1,9 @@
-import { Button, Callout, Dialog, IconButton, TextField } from '@radix-ui/themes'
+import { Button, Dialog, IconButton } from '@radix-ui/themes'
 import type { InferRequestType } from 'hono'
-import { type PropsWithChildren, useState, type SubmitEvent } from 'react'
+import { type PropsWithChildren, useRef, useState, type SubmitEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import useSWRMutation from 'swr/mutation'
-import { client, parseResponse } from '#@/api/client.ts'
+import { client } from '#@/api/client.ts'
 import { libraryModeEnum } from '#@/databases/schema.ts'
 import { useGlobalLoaderData } from '#@/pages/hooks/use-global-loader-data.ts'
 import { DialogRoot } from '#@/pages/library/components/dialog-root.tsx'
@@ -37,23 +37,8 @@ export function GameInfoDialog({ autoFocusField, children = defaultTrigger }: Re
   const isDemo = useIsDemo()
 
   const [open, setOpen] = useState(false)
-  const [matchName, setMatchName] = useState(rom.gameName || rom.fileName.split('/').at(-1) || '')
-  const [matching, setMatching] = useState(false)
-  const [matchError, setMatchError] = useState('')
-
-  async function handleIdentify() {
-    setMatching(true)
-    setMatchError('')
-    try {
-      await parseResponse(client.roms[':id'].identify.$post({ json: { name: matchName }, param: { id: rom.id } }))
-      setOpen(false)
-      await reload()
-    } catch (error) {
-      setMatchError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setMatching(false)
-    }
-  }
+  const formRef = useRef<HTMLFormElement>(null)
+  const initialFields = useRef<FormData>(undefined)
 
   const { isMutating, trigger } = useSWRMutation(
     { endpoint: 'roms', method: 'patch', param: { id: rom.id } },
@@ -61,10 +46,21 @@ export function GameInfoDialog({ autoFocusField, children = defaultTrigger }: Re
       client.roms[':id'].$patch({ form, param }),
   )
 
+  function rememberMountedFields() {
+    if (rom.mountedSource && formRef.current) {
+      initialFields.current = new FormData(formRef.current)
+    }
+  }
+
   async function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault()
-    const formData = new FormData(event.target)
-    await trigger(Object.fromEntries(formData))
+    const original = initialFields.current
+    const fields = [...new FormData(event.currentTarget)].filter(
+      ([name, value]) => !original || original.get(name) !== value,
+    )
+    if (!rom.mountedSource || fields.length) {
+      await trigger(Object.fromEntries(fields))
+    }
     setOpen(false)
     await reload()
   }
@@ -77,41 +73,13 @@ export function GameInfoDialog({ autoFocusField, children = defaultTrigger }: Re
     <DialogRoot onOpenChange={setOpen} open={open}>
       <Dialog.Trigger>{children}</Dialog.Trigger>
 
-      <Dialog.Content aria-describedby={undefined} className='lg:w-2xl!'>
+      <Dialog.Content aria-describedby={undefined} className='lg:w-2xl!' onOpenAutoFocus={rememberMountedFields}>
         <Dialog.Title className='-ml-1! flex items-center gap-2 text-xl font-semibold'>
           <span className='icon-[mdi--view-list]' />
           {getRomGoodcodes(rom).rom}
         </Dialog.Title>
 
-        {rom.mountedSource ? (
-          <div className='flex flex-col gap-2'>
-            {matchError || rom.mountedSource.metadataError ? (
-              <Callout.Root color='orange'>
-                <Callout.Text>{matchError || rom.mountedSource.metadataError}</Callout.Text>
-              </Callout.Root>
-            ) : null}
-            <div className='flex items-center gap-2'>
-              <TextField.Root
-                aria-label={t('common.search')}
-                className='flex-1'
-                onChange={(event) => setMatchName(event.target.value)}
-                value={matchName}
-              />
-              <Button
-                disabled={!matchName.trim()}
-                loading={matching}
-                onClick={handleIdentify}
-                type='button'
-                variant='soft'
-              >
-                <span className='icon-[mdi--search]' />
-                {t('common.search')}
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        <form autoComplete='off' onSubmit={handleSubmit}>
+        <form autoComplete='off' onSubmit={handleSubmit} ref={formRef}>
           <GameInfoDataList autoFocusField={autoFocusField} />
 
           <div className='mt-4 flex justify-end gap-4'>

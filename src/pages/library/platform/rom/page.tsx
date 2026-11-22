@@ -15,6 +15,7 @@ import { GameInfoDialog } from './components/game-info-dialog/game-info-dialog.t
 import { GameInfo } from './components/game-info.tsx'
 import { GameMediaDialog } from './components/game-media-dialog/game-media-dialog.tsx'
 import { GameMedia } from './components/game-media/game-media.tsx'
+import { MountedMetadataRepair } from './components/mounted-metadata-repair.tsx'
 import { RomCollectionsDialog } from './components/rom-collections-dialog.tsx'
 
 export default function RomPage() {
@@ -52,6 +53,8 @@ export default function RomPage() {
                 <RomCollectionsDialog key={rom.id} romId={rom.id} userId={currentUser.id} />
               ) : null}
             </div>
+
+            <MountedMetadataRepair key={rom.id} />
 
             <div className='flex flex-col gap-8 lg:flex-col-reverse'>
               <div className='lg:px-4'>
