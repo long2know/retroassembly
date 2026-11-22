@@ -48,6 +48,10 @@ Favorites, launch history, and savestates remain per-user, including generic
 file delivery for state/thumbnail bytes. New users automatically see indexed
 platforms; explicitly saved platform filters are respected.
 
+On a console page, use **Filter games** to match a title or filename across
+that console. Filtering keeps sorting and favorites in the cover grid. Press
+Escape while the filter is focused, or use its clear button, to clear it.
+
 Shared titles/descriptions, manual matching, and uploaded artwork are app-wide
 metadata edits. Mounted ROMs cannot be deleted or hidden from the library, even
 by an administrator. ROM deletion and bulk selection apply only to uploads

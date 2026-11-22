@@ -1,5 +1,5 @@
 import { Trans, useTranslation } from 'react-i18next'
-import { useLocation } from 'react-router'
+import { useLoaderData, useLocation } from 'react-router'
 import { metadata } from '#@/constants/metadata.ts'
 import { routes } from '#@/pages/routes.ts'
 import { getPlatformIcon } from '#@/utils/client/library.ts'
@@ -10,6 +10,7 @@ import { HomeLinkButton } from './home-link-button.tsx'
 
 export function GameListEmpty() {
   const { t } = useTranslation()
+  const { gameFilter } = useLoaderData<{ gameFilter?: string }>()
   const { pathname, search } = useLocation()
   const platform = usePlatform()
 
@@ -17,6 +18,15 @@ export function GameListEmpty() {
   const isHistory = pathname === routes.libraryHistory
   const isFavorites = pathname === routes.libraryFavorites
   const favorite = new URLSearchParams(search).get('favorite') === '1'
+
+  if (gameFilter) {
+    return (
+      <output className='flex flex-col items-center justify-center gap-2 py-16 text-sm text-(--gray-11) lg:text-xl'>
+        <span aria-hidden className='icon-[mdi--package-variant] size-16 text-(--gray-8)' />
+        {t('platformFilter.noMatches')}
+      </output>
+    )
+  }
 
   return (
     <div className='flex flex-col items-center justify-center gap-2 py-16 text-sm lg:text-xl'>

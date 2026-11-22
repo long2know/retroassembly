@@ -1,4 +1,4 @@
-import { useLocation } from 'react-router'
+import { useLoaderData, useLocation } from 'react-router'
 import { libraryModeEnum } from '#@/databases/schema.ts'
 import { useGlobalLoaderData } from '#@/pages/hooks/use-global-loader-data.ts'
 import { routes } from '../../../routes.ts'
@@ -7,16 +7,19 @@ import { useRoms } from '../../hooks/use-roms.ts'
 
 export function useGameListActions() {
   const { roms } = useRoms()
+  const { gameFilter } = useLoaderData<{ gameFilter?: string }>()
   const { pathname, search } = useLocation()
   const isDemo = useIsDemo()
   const { currentUser, env } = useGlobalLoaderData()
 
+  const hasRoms = roms.length > 0
+  const isEmptyFilteredGrid = !hasRoms && Boolean(gameFilter)
   const isHistoryPage = pathname === routes.libraryHistory
   const isFavoritesPage = pathname === routes.libraryFavorites
   const isSharedLibrary =
     currentUser?.libraryMode === libraryModeEnum.shared &&
     !roms.some((rom) => 'mountedSource' in rom && rom.mountedSource)
-  const shouldHideActions = isDemo || isHistoryPage || isSharedLibrary
+  const shouldHideActions = isDemo || isHistoryPage || (isSharedLibrary && !isEmptyFilteredGrid)
   const isMountedOnly =
     env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY === 'true' &&
     env.RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY === 'true'
@@ -32,12 +35,18 @@ export function useGameListActions() {
   const isViewingFavorites = searchParams.get('favorite') === '1'
   const sort = searchParams.get('sort') || 'name'
 
-  const hasRoms = roms.length > 0
-
-  const showFavoriteButton = (!isFavoritesPage && hasRoms) || isViewingFavorites
-  const showSortDropdown = hasRoms
+  const showSortDropdown = hasRoms || isEmptyFilteredGrid
+  const showFavoriteButton = (!isFavoritesPage && showSortDropdown) || isViewingFavorites
 
   function buildSortLink(params: Record<string, string>) {
+    if (gameFilter !== undefined) {
+      const newParams = new URLSearchParams(searchParams)
+      newParams.delete('page')
+      for (const [key, value] of Object.entries(params)) {
+        newParams.set(key, value)
+      }
+      return [pathname, newParams].join('?')
+    }
     const newParams = new URLSearchParams(params)
     if (isViewingFavorites) {
       newParams.set('favorite', '1')
@@ -47,6 +56,9 @@ export function useGameListActions() {
 
   function getFavoriteToggleLink() {
     const params = new URLSearchParams(search)
+    if (gameFilter !== undefined) {
+      params.delete('page')
+    }
     if (isViewingFavorites) {
       params.delete('favorite')
     } else {

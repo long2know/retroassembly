@@ -1,5 +1,7 @@
+import { syntheticFilterRomCount } from './synthetic-platform-filter.ts'
+
 export const syntheticBatteryRomName = 'Battery Colors.nes'
-export const syntheticNesRomCount = 3
+export const syntheticNesRomCount = 3 + syntheticFilterRomCount
 
 export function createSyntheticNesRom() {
   const header = Buffer.from([0x4e, 0x45, 0x53, 0x1a, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
