@@ -9,11 +9,12 @@ import LibraryLayout from '../components/library-layout/library-layout.tsx'
 import { PageStats } from '../components/page-stats.tsx'
 import { useIsDemo } from '../hooks/use-demo.ts'
 import { PlatformBackground } from './components/platform-background.tsx'
+import { PlatformGameFilter } from './components/platform-game-filter.tsx'
 import { UploadButton } from './components/upload-button.tsx'
 
 export default function PlatformPage() {
   const { t } = useTranslation()
-  const { favorite, pagination, platform, roms } = useLoaderData<typeof loader>()
+  const { favorite, gameFilter, pagination, platform, roms } = useLoaderData<typeof loader>()
   const gameLabel = t('common.game', { count: pagination.total })
   const isDemo = useIsDemo()
 
@@ -21,7 +22,7 @@ export default function PlatformPage() {
     return <>{t('error.notFoundCode')}</>
   }
 
-  if (pagination.current > 1 && roms.length === 0) {
+  if (!gameFilter && pagination.current > 1 && roms.length === 0) {
     return <>{t('error.notFoundCode')}</>
   }
 
@@ -30,7 +31,7 @@ export default function PlatformPage() {
       <PlatformBackground />
 
       <div className='relative'>
-        <GameListMain>
+        <GameListMain filter={isDemo ? undefined : <PlatformGameFilter key={platform} gameFilter={gameFilter} />}>
           <div className={clsx('flex w-full justify-between', { 'flex-col': platformMap[platform].info })}>
             <DeviceInfo platform={platform} />
 

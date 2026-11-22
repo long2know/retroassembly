@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm'
 import { getContext } from 'hono/context-storage'
 import type { PlatformName } from '#@/constants/platform.ts'
 import { favoriteTable, romTable, statusEnum } from '#@/databases/schema.ts'
@@ -12,6 +12,7 @@ export type RomsPagination = GetRomsReturning['pagination']
 interface GetRomsParams {
   direction?: 'asc' | 'desc'
   favorite?: boolean
+  gameFilter?: string
   id?: string
   orderBy?: 'added' | 'name' | 'released'
   page?: number
@@ -19,9 +20,24 @@ interface GetRomsParams {
   platform?: PlatformName
 }
 
+function getLiteralCaseInsensitiveGlob(filter: string) {
+  // SQLite's lower() only folds ASCII. Escape GLOB metacharacters before adding case alternatives.
+  const characters = [...filter].map((character) => {
+    if ('*?['.includes(character)) {
+      return `[${character}]`
+    }
+    const variants = new Set(
+      [character, character.toLowerCase(), character.toUpperCase()].filter((variant) => [...variant].length === 1),
+    )
+    return variants.size === 1 ? character : `[${[...variants].join('')}]`
+  })
+  return `*${characters.join('')}*`
+}
+
 export async function getRoms({
   direction = 'asc',
   favorite = false,
+  gameFilter,
   id,
   orderBy = 'name',
   page = 1,
@@ -38,6 +54,22 @@ export async function getRoms({
   }
   if (platform) {
     conditions.push(eq(romTable.platform, platform))
+    if (gameFilter) {
+      const title =
+        platform === 'arcade'
+          ? sql`coalesce(nullif(${romTable.gameName}, ''), json_extract(${romTable.rawGameMetadata}, '$.libretro.name'))`
+          : romTable.gameName
+      const pattern =
+        /\P{ASCII}/u.test(gameFilter) && !gameFilter.includes('\0') ? getLiteralCaseInsensitiveGlob(gameFilter) : ''
+      const needle = gameFilter.toLowerCase()
+      conditions.push(
+        or(
+          ...[title, romTable.fileName].map((column) =>
+            pattern ? sql`${column} glob ${pattern}` : sql`instr(lower(${column}), ${needle}) > 0`,
+          ),
+        ),
+      )
+    }
   } else if (!id) {
     conditions.push(inArray(romTable.platform, preference.ui.platforms))
   }

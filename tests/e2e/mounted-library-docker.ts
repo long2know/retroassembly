@@ -10,6 +10,7 @@ import {
   createSyntheticNesRom,
   syntheticBatteryRomName,
 } from './fixtures/synthetic-nes.ts'
+import { writeSyntheticPlatformFilterMount } from './fixtures/synthetic-platform-filter.ts'
 import { writeSyntheticPsxMount } from './fixtures/synthetic-psx.ts'
 
 const project = process.cwd()
@@ -151,6 +152,7 @@ try {
   await fs.writeFile(path.join(fixtures, 'outside.nes'), rom)
   await fs.symlink(path.join(fixtures, 'outside.nes'), path.join(romDirectory, 'escape.nes'))
   await fs.writeFile(path.join(romDirectory, 'ignored.txt'), 'Not a supported game\n')
+  await writeSyntheticPlatformFilterMount(romDirectory)
   await writeSyntheticPsxMount(romRoot)
   const before = { bios: await snapshot(biosRoot), roms: await snapshot(romRoot) }
   report.sourceBefore = before

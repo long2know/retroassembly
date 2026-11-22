@@ -10,6 +10,7 @@ export default defineConfig({
     'mounted-psx-playlist.spec.ts',
     'nes-in-game-save-sync.spec.ts',
     'per-game-emulator.spec.ts',
+    'platform-game-filter.spec.ts',
     'private-game-collections.spec.ts',
   ],
   timeout: 240_000,
