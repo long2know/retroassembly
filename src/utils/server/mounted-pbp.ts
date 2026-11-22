@@ -53,9 +53,9 @@ function readFrames(bytes: Buffer, offset: number) {
     : -1
 }
 
-function getTocSectors(bytes: Buffer) {
+function getTocBounds(bytes: Buffer) {
   const trackCount = bcd(bytes[tocOffset + tocEntryBytes + 7])
-  const sectors = readFrames(bytes, tocOffset + 2 * tocEntryBytes + 7)
+  const leadOut = readFrames(bytes, tocOffset + 2 * tocEntryBytes + 7)
   const startsWithData = Math.trunc(bytes[tocOffset + 3 * tocEntryBytes] / 0x40) % 2 === 1
   if (
     trackCount < 1 ||
@@ -64,13 +64,13 @@ function getTocSectors(bytes: Buffer) {
     bytes[tocOffset + tocEntryBytes + 2] !== 0xa1 ||
     bytes[tocOffset + 2 * tocEntryBytes + 2] !== 0xa2 ||
     !startsWithData ||
-    sectors < 1
+    leadOut < 1
   ) {
     return
   }
   let previousOffset = -1
   let previousStart = -1
-  let requiredSectors = sectors
+  let trackSectors = 0
   for (let track = 1; track <= trackCount; track += 1) {
     const entry = tocOffset + (track + 2) * tocEntryBytes
     const offset = readFrames(bytes, entry + 3)
@@ -79,20 +79,33 @@ function getTocSectors(bytes: Buffer) {
       bcd(bytes[entry + 2]) !== track ||
       offset < 0 ||
       offset <= previousOffset ||
-      offset >= sectors ||
+      offset >= leadOut ||
       start < 0 ||
       start <= previousStart ||
-      start >= sectors
+      start >= leadOut
     ) {
       return
     }
     if (track > 1) {
-      requiredSectors = Math.max(requiredSectors, previousOffset + start - previousStart)
+      trackSectors = Math.max(trackSectors, previousOffset + start - previousStart)
     }
     previousOffset = offset
     previousStart = start
   }
-  return Math.max(requiredSectors, sectors + previousStart - previousOffset)
+  trackSectors = Math.max(trackSectors, previousOffset + 1)
+  const lastTrackShift = Math.max(0, previousStart - previousOffset)
+  return { lastTrackShift, leadOut, trackSectors }
+}
+
+function indexCoversToc(indexedSectors: number, toc: NonNullable<ReturnType<typeof getTocBounds>>) {
+  function fits(sectors: number) {
+    return toc.trackSectors <= sectors && sectors + toc.lastTrackShift <= indexedSectors
+  }
+
+  // PSXPackager counts disc sectors; pop-fe's generated A2 includes the 150-frame lead-in.
+  // Infer that second convention only when the index length agrees to within one block's padding.
+  const discSectors = toc.leadOut - leadIn
+  return fits(toc.leadOut) || (indexedSectors - discSectors < sectorsPerBlock && fits(discSectors))
 }
 
 interface PbpBlock {
@@ -103,7 +116,7 @@ interface PbpBlock {
 async function inspectIndex(
   handle: FileHandle,
   psar: number,
-  { payloadBytes, sectors }: { payloadBytes: number; sectors: number },
+  { payloadBytes, toc }: { payloadBytes: number; toc: NonNullable<ReturnType<typeof getTocBounds>> },
 ): Promise<PbpCompatibility> {
   const dataStart = psar + dataOffset
   const index = await readAt(handle, psar + indexOffset, dataOffset - indexOffset)
@@ -115,10 +128,10 @@ async function inspectIndex(
     const length = index.readUInt32LE(entry + 4)
     const end = last ? last.offset + last.length : 0
     if (!length) {
-      if (!first || !last || count * sectorsPerBlock < sectors) {
-        return malformed
+      if (!first || !last || !indexCoversToc(count * sectorsPerBlock, toc)) {
+        return { unsupportedReason: 'The PlayStation PBP block index is too short for its disc table of contents.' }
       }
-      const needsEnd = offset === 0 && !index.subarray(entry, entry + indexEntryBytes).some((byte) => byte !== 0)
+      const needsEnd = offset === 0 && !index.subarray(entry).some((byte) => byte !== 0)
       if (offset !== end && !needsEnd) {
         return { unsupportedReason: 'The PlayStation PBP has an invalid final block index entry.' }
       }
@@ -134,17 +147,19 @@ async function inspectIndex(
       // The pinned core reads the final block using this entry, even when the writer left it zero-padded.
       return needsEnd ? { pbpEndPatch: { end, offset: psar + indexOffset + entry } } : {}
     }
-    if (length > maxCompressedBytes || offset + length > payloadBytes || (last && offset !== end)) {
-      return malformed
+    // pop-fe can set a flag in the upper half of the stored-block length word.
+    const blockLength = length === blockBytes + 0x1_00_00 ? blockBytes : length
+    if (blockLength > maxCompressedBytes || offset + blockLength > payloadBytes || (last && offset !== end)) {
+      return { unsupportedReason: 'The PlayStation PBP has an invalid block range in its index.' }
     }
-    if (length === blockBytes) {
+    if (blockLength === blockBytes) {
       return { unsupportedReason: 'Uncompressed blocks in PlayStation PBP are not supported by the browser core.' }
     }
     last = { length, offset }
     first ??= last
     count += 1
   }
-  return malformed
+  return { unsupportedReason: 'The PlayStation PBP is missing its final block index entry.' }
 }
 
 async function getPbpCompatibility(handle: FileHandle, size: number): Promise<PbpCompatibility> {
@@ -193,11 +208,11 @@ async function getPbpCompatibility(handle: FileHandle, size: number): Promise<Pb
   if (dataStart >= size) {
     return malformed
   }
-  const sectors = getTocSectors(prefix)
-  if (!sectors) {
+  const toc = getTocBounds(prefix)
+  if (!toc) {
     return { unsupportedReason: 'The PlayStation PBP has an invalid disc table of contents.' }
   }
-  return await inspectIndex(handle, psar, { payloadBytes: size - dataStart, sectors })
+  return await inspectIndex(handle, psar, { payloadBytes: size - dataStart, toc })
 }
 
 export async function inspectMountedPbp(root: MountedRoot, relative: string) {

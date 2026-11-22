@@ -254,7 +254,7 @@ test('switches real mounted PlayStation discs lazily and restores private disc-b
   await expect(page.locator('#canvas')).not.toBeAttached()
 })
 
-test('boots and resumes a zero-padded compressed mounted PlayStation PBP', async ({ page }) => {
+test('boots and resumes a compressed mounted PlayStation PBP with a lead-in-inclusive TOC', async ({ page }) => {
   const deployment = process.env.RETROASSEMBLY_MOUNTED_TEST_URL
   test.skip(!deployment, 'Requires the mounted synthetic PlayStation acceptance fixture')
   const { origin, pathname } = new URL(deployment || '')
@@ -276,7 +276,7 @@ test('boots and resumes a zero-padded compressed mounted PlayStation PBP', async
   }
   expect(rom.mountedSource.unsupportedReason).toBeUndefined()
   expect(rom.mountedSource.playlist).toBeUndefined()
-  const { bytes: fixture, endPatch } = createSyntheticPsxPbp()
+  const { bytes: fixture, endPatch } = createSyntheticPsxPbp({ layout: 'pop-fe' })
   expect(fixture.readUInt32LE(endPatch.offset)).toBe(0)
   expect(rom.mountedSource.pbpEndPatch).toEqual(endPatch)
   const coreUrl =

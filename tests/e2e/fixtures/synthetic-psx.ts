@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { deflateRawSync } from 'node:zlib'
@@ -152,7 +153,11 @@ export function createSyntheticPsxChd(disc: 1 | 2 | 3) {
   return bytes
 }
 
-export function createSyntheticPsxPbp(compressed = true) {
+export function createSyntheticPsxPbp({
+  compressed = true,
+  layout = 'disc-relative',
+}: { compressed?: boolean; layout?: 'disc-relative' | 'pop-fe' } = {}) {
+  const popFe = layout === 'pop-fe'
   const psar = 0x8_00
   const header = Buffer.alloc(psar + 0x10_00_00)
   header.write('\0PBP')
@@ -163,10 +168,11 @@ export function createSyntheticPsxPbp(compressed = true) {
   header.writeUInt32LE(psar, 36)
   header.write('PSISOIMG0000', psar)
   const toc = psar + 0x8_00
-  header.set([0x41, 0, 0xa0, 0, 0, 0, 0, 1, 0, 0], toc)
+  header.set([0x41, 0, 0xa0, 0, 0, 0, 0, 1, popFe ? 0x20 : 0, 0], toc)
   header.set([0x41, 0, 0xa1, 0, 0, 0, 0, 1, 0, 0], toc + 10)
-  header.set([0x41, 0, 0xa2, 0, 0, 0, 0, 0, 4, 0], toc + 20)
-  header.set([0x41, 0, 1, 0, 0, 0, 0, 0, 2, 0], toc + 30)
+  const leadOut = sectorCount + (popFe ? 150 : 0)
+  header.set([0x41, 0, 0xa2, 0, 0, 0, 0, 0, bcd(Math.trunc(leadOut / 75)), bcd(leadOut % 75)], toc + 20)
+  header.set([0x41, 0, 1, 0, popFe ? 2 : 0, popFe ? 1 : 0, 0, 0, 2, 0], toc + 30)
 
   // Boot from the last block so the rendered frame exercises the terminating index offset.
   const sectors = createSyntheticPsxSectors(4, rawSectorBytes, sectorCount - 2)
@@ -179,7 +185,16 @@ export function createSyntheticPsxPbp(compressed = true) {
     const bytes = compressed ? deflateRawSync(block) : block
     const index = psar + 0x40_00 + blocks.length * 32
     header.writeUInt32LE(blockOffset, index)
-    header.writeUInt32LE(bytes.length, index + 4)
+    if (popFe) {
+      header.writeUInt16LE(bytes.length, index + 4)
+      header[index + 6] = compressed ? 0 : 1
+      createHash('sha1')
+        .update(block)
+        .digest()
+        .copy(header, index + 8, 0, 16)
+    } else {
+      header.writeUInt32LE(bytes.length, index + 4)
+    }
     blocks.push(bytes)
     blockOffset += bytes.length
   }
@@ -199,5 +214,5 @@ export async function writeSyntheticPsxMount(root: string) {
   await writeFile(path.join(directory, 'Disc A.chd'), createSyntheticPsxChd(1))
   await writeFile(path.join(directory, 'Discs', 'Disc B.CHD'), createSyntheticPsxChd(2))
   await writeFile(path.join(directory, 'Disc C.chd'), createSyntheticPsxChd(3))
-  await writeFile(path.join(root, 'ps1', syntheticPsxPbp), createSyntheticPsxPbp().bytes)
+  await writeFile(path.join(root, 'ps1', syntheticPsxPbp), createSyntheticPsxPbp({ layout: 'pop-fe' }).bytes)
 }
