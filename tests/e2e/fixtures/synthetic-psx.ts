@@ -1,13 +1,16 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { deflateRawSync } from 'node:zlib'
 
 export const syntheticPsxPlaylist = 'Homebrew/Disc Colors.m3u'
-export const syntheticPsxRomCount = 4
+export const syntheticPsxPbp = 'Homebrew/Standalone Magenta.PBP'
+export const syntheticPsxRomCount = 5
 
 const sectorCount = 300
-const sectorBytes = 2448
+const rawSectorBytes = 2352
+const chdSectorBytes = 2448
 const dataBytes = 2048
-const hunkBytes = 8 * sectorBytes
+const hunkBytes = 8 * chdSectorBytes
 
 function both16(buffer: Buffer, offset: number, value: number) {
   buffer.writeUInt16LE(value, offset)
@@ -72,37 +75,16 @@ function bcd(value: number) {
   return Math.trunc(value / 10) * 16 + (value % 10)
 }
 
-export function createSyntheticPsxChd(disc: 1 | 2 | 3) {
-  const hunkCount = Math.ceil((sectorCount * sectorBytes) / hunkBytes)
-  const bytes = Buffer.alloc((hunkCount + 1) * hunkBytes)
-  const mapOffset = 124
-  const metadataOffset = mapOffset + hunkCount * 4
-  const track = `TRACK:1 TYPE:MODE2_RAW SUBTYPE:NONE FRAMES:${sectorCount} PREGAP:0 PGTYPE:MODE1 PGSUB:NONE POSTGAP:0\0`
-
-  bytes.write('MComprHD')
-  bytes.writeUInt32BE(mapOffset, 8)
-  bytes.writeUInt32BE(5, 12)
-  bytes.writeBigUInt64BE(BigInt(sectorCount * sectorBytes), 32)
-  bytes.writeBigUInt64BE(BigInt(mapOffset), 40)
-  bytes.writeBigUInt64BE(BigInt(metadataOffset), 48)
-  bytes.writeUInt32BE(hunkBytes, 56)
-  bytes.writeUInt32BE(sectorBytes, 60)
-  for (let hunk = 0; hunk < hunkCount; hunk += 1) {
-    bytes.writeUInt32BE(hunk + 1, mapOffset + hunk * 4)
-  }
-  bytes.write('CHT2', metadataOffset)
-  bytes.writeUInt32BE(0x01_00_00_00 + track.length, metadataOffset + 4)
-  bytes.write(track, metadataOffset + 16, 'ascii')
-
-  // CHD v5, uncompressed Mode 2 sectors with an original single-directory ISO 9660 image.
+function createSyntheticPsxSectors(disc: 1 | 2 | 3 | 4, sectorBytes: number, exeSector = 22) {
+  const bytes = Buffer.alloc(sectorCount * sectorBytes)
   for (let sector = 0; sector < sectorCount; sector += 1) {
-    const offset = hunkBytes + sector * sectorBytes
+    const offset = sector * sectorBytes
     const frame = sector + 150
     bytes.fill(0xff, offset + 1, offset + 11)
     bytes.set([0, bcd(Math.trunc(frame / 75)), bcd(frame % 75), 2, 0, 0, 8, 0, 0, 0, 8, 0], offset + 12)
   }
   function sectorData(sector: number) {
-    const offset = hunkBytes + sector * sectorBytes + 24
+    const offset = sector * sectorBytes + 24
     return bytes.subarray(offset, offset + dataBytes)
   }
   const primary = sectorData(16)
@@ -130,19 +112,81 @@ export function createSyntheticPsxChd(disc: 1 | 2 | 3) {
 
   const id = `SLUS_999.0${disc}`
   const config = `BOOT = cdrom:\\${id};1\r\nTCB = 4\r\nEVENT = 16\r\nSTACK = 801FFF00\r\n`
-  const exe = createExecutable([0x00_00_ff, 0x00_ff_00, 0xff_00_00][disc - 1])
+  const exe = createExecutable([0x00_00_ff, 0x00_ff_00, 0xff_00_00, 0xff_00_ff][disc - 1])
   sectorData(20).set(
     Buffer.concat([
       directoryEntry({ directory: true, length: dataBytes, name: '\0', sector: 20 }),
       directoryEntry({ directory: true, length: dataBytes, name: '\u0001', sector: 20 }),
       directoryEntry({ length: config.length, name: 'SYSTEM.CNF;1', sector: 21 }),
-      directoryEntry({ length: exe.length, name: `${id};1`, sector: 22 }),
+      directoryEntry({ length: exe.length, name: `${id};1`, sector: exeSector }),
     ]),
   )
   sectorData(21).write(config)
-  sectorData(22).set(exe.subarray(0, dataBytes))
-  sectorData(23).set(exe.subarray(dataBytes))
+  sectorData(exeSector).set(exe.subarray(0, dataBytes))
+  sectorData(exeSector + 1).set(exe.subarray(dataBytes))
   return bytes
+}
+
+export function createSyntheticPsxChd(disc: 1 | 2 | 3) {
+  const hunkCount = Math.ceil((sectorCount * chdSectorBytes) / hunkBytes)
+  const bytes = Buffer.alloc((hunkCount + 1) * hunkBytes)
+  const mapOffset = 124
+  const metadataOffset = mapOffset + hunkCount * 4
+  const track = `TRACK:1 TYPE:MODE2_RAW SUBTYPE:NONE FRAMES:${sectorCount} PREGAP:0 PGTYPE:MODE1 PGSUB:NONE POSTGAP:0\0`
+
+  bytes.write('MComprHD')
+  bytes.writeUInt32BE(mapOffset, 8)
+  bytes.writeUInt32BE(5, 12)
+  bytes.writeBigUInt64BE(BigInt(sectorCount * chdSectorBytes), 32)
+  bytes.writeBigUInt64BE(BigInt(mapOffset), 40)
+  bytes.writeBigUInt64BE(BigInt(metadataOffset), 48)
+  bytes.writeUInt32BE(hunkBytes, 56)
+  bytes.writeUInt32BE(chdSectorBytes, 60)
+  for (let hunk = 0; hunk < hunkCount; hunk += 1) {
+    bytes.writeUInt32BE(hunk + 1, mapOffset + hunk * 4)
+  }
+  bytes.write('CHT2', metadataOffset)
+  bytes.writeUInt32BE(0x01_00_00_00 + track.length, metadataOffset + 4)
+  bytes.write(track, metadataOffset + 16, 'ascii')
+  createSyntheticPsxSectors(disc, chdSectorBytes).copy(bytes, hunkBytes)
+  return bytes
+}
+
+export function createSyntheticPsxPbp(compressed = true) {
+  const psar = 0x8_00
+  const header = Buffer.alloc(psar + 0x10_00_00)
+  header.write('\0PBP')
+  header.writeUInt32LE(0x01_00_00, 4)
+  for (let offset = 8; offset < 36; offset += 4) {
+    header.writeUInt32LE(40, offset)
+  }
+  header.writeUInt32LE(psar, 36)
+  header.write('PSISOIMG0000', psar)
+  const toc = psar + 0x8_00
+  header.set([0x41, 0, 0xa0, 0, 0, 0, 0, 1, 0, 0], toc)
+  header.set([0x41, 0, 0xa1, 0, 0, 0, 0, 1, 0, 0], toc + 10)
+  header.set([0x41, 0, 0xa2, 0, 0, 0, 0, 0, 4, 0], toc + 20)
+  header.set([0x41, 0, 1, 0, 0, 0, 0, 0, 2, 0], toc + 30)
+
+  // Boot from the last block so the rendered frame exercises the terminating index offset.
+  const sectors = createSyntheticPsxSectors(4, rawSectorBytes, sectorCount - 2)
+  const blockBytes = 16 * rawSectorBytes
+  const blocks: Buffer[] = []
+  let blockOffset = 0
+  for (let offset = 0; offset < sectors.length; offset += blockBytes) {
+    const block = Buffer.alloc(blockBytes)
+    sectors.copy(block, 0, offset, offset + blockBytes)
+    const bytes = compressed ? deflateRawSync(block) : block
+    const index = psar + 0x40_00 + blocks.length * 32
+    header.writeUInt32LE(blockOffset, index)
+    header.writeUInt32LE(bytes.length, index + 4)
+    blocks.push(bytes)
+    blockOffset += bytes.length
+  }
+  return {
+    bytes: Buffer.concat([header, ...blocks]),
+    endPatch: { end: blockOffset, offset: psar + 0x40_00 + blocks.length * 32 },
+  }
 }
 
 export async function writeSyntheticPsxMount(root: string) {
@@ -155,4 +199,5 @@ export async function writeSyntheticPsxMount(root: string) {
   await writeFile(path.join(directory, 'Disc A.chd'), createSyntheticPsxChd(1))
   await writeFile(path.join(directory, 'Discs', 'Disc B.CHD'), createSyntheticPsxChd(2))
   await writeFile(path.join(directory, 'Disc C.chd'), createSyntheticPsxChd(3))
+  await writeFile(path.join(root, 'ps1', syntheticPsxPbp), createSyntheticPsxPbp().bytes)
 }

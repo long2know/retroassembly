@@ -43,6 +43,7 @@ import {
 import { auth } from '#@/middlewares/auth.ts'
 import { baseUrl } from '#@/middlewares/base-url.ts'
 import { globals } from '#@/middlewares/globals.ts'
+import { createMountedPbpPreparation, fetchMountedPbp } from '#@/pages/library/utils/mounted-pbp.ts'
 import { getRomUrl } from '#@/pages/library/utils/rom.ts'
 import { routes } from '#@/pages/routes.ts'
 import { createDrizzle } from '#@/utils/server/drizzle.ts'
@@ -61,6 +62,7 @@ import { requireRom } from '#@/utils/server/rom-access.ts'
 import { createFilesystemStorage, createStorage } from '#@/utils/server/storage.ts'
 import { createSupabase } from '#@/utils/server/supabase.ts'
 import { createSyntheticBatteryNesRom, createSyntheticNesRom } from '../e2e/fixtures/synthetic-nes.ts'
+import { createSyntheticPsxPbp } from '../e2e/fixtures/synthetic-psx.ts'
 
 const playlistBinding = z.object({ disc: z.number(), revision: z.string() })
 const playlistResponse = z.object({
@@ -82,6 +84,7 @@ const romResponse = z.object({
       metadata: z.string(),
       metadataError: z.string().optional(),
       path: z.string(),
+      pbpEndPatch: z.object({ end: z.number(), offset: z.number() }).optional(),
       playlist: playlistResponse.optional(),
       playlistIssue: z.object({ code: z.string(), line: z.number().optional() }).optional(),
       revision: z.string(),
@@ -166,7 +169,10 @@ function playlistSaveForm(romId: string, type: 'auto' | 'manual', binding?: { di
   return { body, method: 'POST' }
 }
 
-function trackFileHandles(t: TestContext, configure?: (handle: FileHandle) => void) {
+function trackFileHandles(
+  t: TestContext,
+  configure?: (handle: FileHandle, filename: Parameters<typeof fs.open>[0]) => void,
+) {
   const opened: { closeCalls: number; handle: FileHandle }[] = []
   const nativeOpen = fs.open
   async function trackOpen(...args: Parameters<typeof fs.open>) {
@@ -179,7 +185,7 @@ function trackFileHandles(t: TestContext, configure?: (handle: FileHandle) => vo
     }
     t.mock.method(handle, 'close', trackClose)
     opened.push(record)
-    configure?.(handle)
+    configure?.(handle, args[0])
     return handle
   }
   t.mock.method(fs, 'open', trackOpen)
@@ -1504,32 +1510,46 @@ await describe('mounted shared library', async () => {
     assert.deepEqual(await sourceSnapshot(f.roms), before)
   })
 
-  await it('refreshes legacy PlayStation PBP guidance only after a complete scan without enabling launch', async (t) => {
+  await it('enables a legacy mounted PlayStation PBP only on a complete scan and keeps its metadata and identity', async (t) => {
+    const { bytes, endPatch } = createSyntheticPsxPbp()
+    const sourcePath = 'ps1/Legacy game.PBP'
     const f = await fixture(t, {
       'roms/PSX/First.chd': 'synthetic first CHD',
       'roms/PSX/Game.m3u': 'First.chd\nSecond.chd\n',
-      'roms/PSX/Legacy game.pbp': 'synthetic PBP',
       'roms/PSX/Second.chd': 'synthetic second CHD',
+      [`roms/${sourcePath}`]: bytes,
     })
     const before = await sourceSnapshot(f.roms)
     const roms = f.library.select().from(romTable).all()
-    const pbp = roms.find(({ fileName }) => fileName === 'Legacy game.pbp')
+    const pbp = roms.find(({ fileId }) => fileId === getMountedFileId('roms', sourcePath))
     const chd = roms.find(({ fileName }) => fileName === 'First.chd')
     const playlist = roms.find(({ fileName }) => fileName === 'Game.m3u')
     assert.ok(pbp?.mountedSource && chd && playlist?.mountedSource?.playlist)
-    const legacyReason =
-      'This mounted disc/playlist format is not supported by this browser integration. CUE/M3U dependencies are not loaded. PlayStation currently requires a standalone CHD. No source conversion is performed.'
+    const legacyReason = 'This PlayStation PBP is missing the final block end offset required by the browser core.'
     const manual = {
       gameBoxartFileIds: 'attachments/alice/legacy-cover.png',
       gameDescription: 'My description',
       gameName: 'My title',
     }
+    const identification = {
+      ...(await getMountedIdentification(pbp, f.configuration.roms)),
+      confidence: 'filename' as const,
+    }
+    assert.equal(identification.mode, 'name-only')
+    assert.equal(identification.md5, undefined)
     await writeFixture(f.storage, manual.gameBoxartFileIds, 'app-owned artwork')
     await f.library
       .update(romTable)
       .set({
         ...manual,
-        mountedSource: { ...pbp.mountedSource, artwork: 'manual', metadata: 'manual', unsupportedReason: legacyReason },
+        mountedSource: {
+          ...pbp.mountedSource,
+          artwork: 'manual',
+          identification,
+          metadata: 'manual',
+          pbpEndPatch: undefined,
+          unsupportedReason: legacyReason,
+        },
       })
       .where(eq(romTable.id, pbp.id))
 
@@ -1540,33 +1560,31 @@ await describe('mounted shared library', async () => {
       return f.request('/launch_records', { body, method: 'POST' })
     }
 
-    const readDirectory = fs.readdir
-    const interruptedTraversal = t.mock.method(
-      fs,
-      'readdir',
-      async function read(...args: Parameters<typeof readDirectory>) {
-        if (args[0] === f.bios) {
-          throw new Error('Fixture BIOS traversal interrupted')
-        }
-        return await readDirectory(...args)
-      },
-    )
-    syncBuiltinESMExports()
-    try {
-      await expectStatus(f.request('/mounted-library', { method: 'POST' }), 503)
-      const stale = await expectStatus(launch(pbp.id), 422)
-      assert.deepEqual(await stale.json(), { message: legacyReason })
-    } finally {
-      interruptedTraversal.mock.restore()
-      syncBuiltinESMExports()
-    }
+    const sourceFile = path.join(f.roms, sourcePath)
+    let failing = true
+    let failed = false
+    const opened = trackFileHandles(t, (handle, filename) => {
+      if (failing && filename === sourceFile) {
+        t.mock.method(handle, 'read', function fail() {
+          failed = true
+          return Promise.reject(new Error('Fixture PBP read interrupted'))
+        })
+      }
+    })
+    await expectStatus(f.request('/mounted-library', { method: 'POST' }), 503)
+    const stale = await expectStatus(launch(pbp.id), 422)
+    assert.deepEqual(await stale.json(), { message: legacyReason })
+    assert.ok(failed)
+    assert.ok(opened.every(({ closeCalls }) => closeCalls === 1))
+    failing = false
 
     await expectStatus(f.request('/mounted-library', { method: 'POST' }), 200)
-    const currentReason =
-      'This mounted disc/playlist format is not supported. For PlayStation, use a standalone CHD or an M3U listing only CHDs. No source conversion is performed.'
     const detail = await expectStatus(f.request(`/roms/${pbp.id}`), 200)
     const refreshed = romResponse.extend({ gameDescription: z.string() }).parse(await detail.json())
-    assert.equal(refreshed.mountedSource?.unsupportedReason, currentReason)
+    assert.ok(refreshed.mountedSource)
+    assert.equal(refreshed.mountedSource.unsupportedReason, undefined)
+    assert.deepEqual(refreshed.mountedSource.pbpEndPatch, endPatch)
+    assert.equal(refreshed.mountedSource.playlist, undefined)
     assert.equal(refreshed.mountedSource.revision, pbp.mountedSource.revision)
     assert.equal(refreshed.mountedSource.metadata, 'manual')
     assert.equal(refreshed.mountedSource.artwork, 'manual')
@@ -1576,18 +1594,184 @@ await describe('mounted shared library', async () => {
     assert.equal(refreshed.gameDescription, manual.gameDescription)
     assert.equal(refreshed.gameBoxartFileIds, manual.gameBoxartFileIds)
     assert.equal(await readFile(path.join(f.storage, manual.gameBoxartFileIds), 'utf8'), 'app-owned artwork')
-    const blocked = await expectStatus(launch(pbp.id), 422)
-    assert.deepEqual(await blocked.json(), { message: currentReason })
+    const updated = f.library.select().from(romTable).where(eq(romTable.id, pbp.id)).get()
+    assert.ok(updated?.mountedSource)
+    assert.deepEqual(updated.mountedSource.identification, identification)
+    await f.library
+      .update(romTable)
+      .set({ mountedSource: { ...updated.mountedSource, pbpEndPatch: undefined } })
+      .where(eq(romTable.id, pbp.id))
+    await f.mounted.scan()
+    const repaired = f.library.select().from(romTable).where(eq(romTable.id, pbp.id)).get()
+    assert.deepEqual(repaired?.mountedSource?.pbpEndPatch, endPatch)
+    const playback = await f.playback(pbp.id)
+    assert.equal(playback.core, 'pcsx_rearmed')
+    await expectStatus(launch(pbp.id), 200)
+    const launched = f.library.select().from(launchRecordTable).where(eq(launchRecordTable.romId, pbp.id)).get()
+    assert.partialDeepStrictEqual(launched, { core: 'pcsx_rearmed', platform: 'psx', romId: pbp.id, userId: 'alice' })
+    const fileUrl = `/files/${encodeURIComponent(pbp.fileId)}`
+    await expectStatus(f.request(fileUrl, {}, ''), 400)
+    for (const url of [fileUrl, `/roms/${pbp.id}/content`]) {
+      const read = await expectStatus(f.request(url, {}, 'bob'), 200)
+      assert.equal(read.headers.get('ETag'), `"${pbp.mountedSource.revision}"`)
+      assert.deepEqual(Buffer.from(await read.arrayBuffer()), bytes)
+    }
     await expectStatus(launch(chd.id), 200)
     await expectStatus(launch(playlist.id), 200)
     const discUrl = `/roms/${playlist.id}/discs/2?revision=${playlist.mountedSource.playlist.revision}`
     const disc = await expectStatus(f.request(discUrl), 200)
     assert.equal(await disc.text(), 'synthetic second CHD')
     assert.deepEqual(await sourceSnapshot(f.roms), before)
+    await rename(sourceFile, `${sourceFile}.old`)
+    await symlink(path.join(f.roms, 'PSX/First.chd'), sourceFile)
+    await expectStatus(f.request(fileUrl), 503)
+    await rm(sourceFile)
+    await writeFile(sourceFile, 'replacement PBP')
+    await expectStatus(f.request(fileUrl, { method: 'HEAD' }), 409)
+    await expectStatus(f.request('/mounted-library', { method: 'POST' }), 200)
+    await expectStatus(f.request(fileUrl), 422)
+    const replaced = f.library.select().from(romTable).where(eq(romTable.id, pbp.id)).get()
+    assert.equal(replaced?.mountedSource?.pbpEndPatch, undefined)
     for (const extension of ['.bin', '.cue', '.iso', '.m3u8']) {
       assert.equal(getMountedFormat('psx', extension)?.supported, false, extension)
     }
     assert.equal(resolveMountedPlatform('shadps4'), undefined)
+  })
+
+  await it('keeps unsupported or malformed PBP entries indexed without serving them as PlayStation discs', async (t) => {
+    const { bytes, endPatch } = createSyntheticPsxPbp()
+    const psar = bytes.readUInt32LE(36)
+    const index = psar + 0x40_00
+    function variant(edit: (copy: Buffer) => void) {
+      const copy = Buffer.from(bytes)
+      edit(copy)
+      return copy
+    }
+    const invalid = {
+      badHeader: [Buffer.alloc(60), /does not have a PBP header/u],
+      badOffset: [variant((copy) => copy.writeUInt32LE(copy.length + 1, 36)), /malformed or truncated/u],
+      badToc: [variant((copy) => copy.fill(0xfa, psar + 0x8_11, psar + 0x8_12)), /invalid disc table/u],
+      corruptBlock: [
+        variant((copy) => copy.fill(0xff, psar + 0x10_00_00, psar + 0x10_00_01)),
+        /unreadable disc blocks/u,
+      ],
+      discontinuousIndex: [variant((copy) => copy.writeUInt32LE(0, index + 32)), /malformed or truncated/u],
+      largeBlock: [variant((copy) => copy.writeUInt32LE(16 * 2352 + 101, index + 4)), /malformed or truncated/u],
+      multiDisc: [variant((copy) => copy.write('PSTITLEIMG', psar)), /Multi-disc PlayStation PBP/u],
+      nonDisc: [variant((copy) => copy.write('NotADisc!!', psar)), /does not contain a supported single-disc/u],
+      nonzeroPadding: [variant((copy) => copy.writeUInt8(1, endPatch.offset + 8)), /invalid final block index/u],
+      protected: [variant((copy) => copy.write('\0PGD', psar + 0x4_00)), /Protected PlayStation PBP/u],
+      psp: [
+        variant((copy) => {
+          copy.write('PSISOIMG0000', 40)
+          copy.write('NPUMDIMG', psar)
+        }),
+        /PSP PBP/u,
+      ],
+      stored: [createSyntheticPsxPbp(false).bytes, /Uncompressed blocks/u],
+      truncated: [bytes.subarray(0, -1), /malformed or truncated/u],
+      wrongEnd: [
+        variant((copy) => copy.writeUInt32LE(endPatch.end - 1, endPatch.offset)),
+        /invalid final block index/u,
+      ],
+    } as const
+    const explicit = variant((copy) => copy.writeUInt32LE(endPatch.end, endPatch.offset))
+    const f = await fixture(t, {
+      ...Object.fromEntries(Object.entries(invalid).map(([name, [pbp]]) => [`roms/PSX/${name}.pbp`, pbp])),
+      'roms/nes/Not a PlayStation mount.pbp': bytes,
+      'roms/PSX/Explicit end.pbp': explicit,
+      'roms/PSX/First.chd': 'standalone CHD',
+      'roms/PSX/Good.pbp': bytes,
+      'roms/PSX/Mixed.m3u': 'First.chd\nGood.pbp\n',
+    })
+    const { roms } = await f.list()
+    assert.equal(f.mounted.getStatus().unsupported, Object.keys(invalid).length + 2)
+    for (const [name, [, reason]] of Object.entries(invalid)) {
+      const rom = roms.find(({ fileName }) => fileName === `${name}.pbp`)
+      assert.ok(rom?.mountedSource?.unsupportedReason, name)
+      assert.match(rom.mountedSource.unsupportedReason, reason, name)
+      assert.equal(rom.mountedSource.pbpEndPatch, undefined, name)
+      const form = new FormData()
+      form.set('core', 'pcsx_rearmed')
+      form.set('rom', rom.id)
+      await expectStatus(f.request('/launch_records', { body: form, method: 'POST' }), 422)
+      await expectStatus(f.request(`/roms/${rom.id}/content`), 422)
+    }
+    const valid = roms.find(({ fileName }) => fileName === 'Good.pbp')
+    assert.ok(valid?.mountedSource)
+    assert.equal(valid.mountedSource.unsupportedReason, undefined)
+    assert.deepEqual(valid.mountedSource.pbpEndPatch, endPatch)
+    const explicitEnd = roms.find(({ fileName }) => fileName === 'Explicit end.pbp')
+    assert.ok(explicitEnd?.mountedSource)
+    assert.equal(explicitEnd.mountedSource.unsupportedReason, undefined)
+    assert.equal(explicitEnd.mountedSource.pbpEndPatch, undefined)
+    const explicitContent = await expectStatus(f.request(`/roms/${explicitEnd.id}/content`), 200)
+    assert.deepEqual(Buffer.from(await explicitContent.arrayBuffer()), explicit)
+    assert.deepEqual(roms.find(({ fileName }) => fileName === 'Mixed.m3u')?.mountedSource?.playlistIssue, {
+      code: 'Format',
+      line: 2,
+    })
+    assert.match(
+      roms.find(({ fileName }) => fileName === 'Not a PlayStation mount.pbp')?.mountedSource?.unsupportedReason || '',
+      /not supported/u,
+    )
+
+    process.env.RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY = 'false'
+    const upload = new FormData()
+    upload.set('platform', 'psx')
+    upload.set('file', new File([bytes], 'Good.pbp'))
+    const rejectedUpload = await expectStatus(f.request('/roms', { body: upload, method: 'POST' }), 400)
+    assert.deepEqual(await rejectedUpload.json(), { message: 'File extension .pbp is not supported for platform psx' })
+  })
+
+  await it('patches just the virtual PBP terminator and refuses mismatched revisions or bytes', async (t) => {
+    const { bytes, endPatch } = createSyntheticPsxPbp()
+    const source = { fileId: getMountedFileId('roms', 'ps1/Fixture.PBP'), patch: endPatch, revision: 'a'.repeat(64) }
+    const expected = Buffer.from(bytes)
+    expected.writeUInt32LE(endPatch.end, endPatch.offset)
+    let responseBytes = bytes
+    let etag = `"${source.revision}"`
+    const controller = new AbortController()
+    t.mock.method(globalThis, 'fetch', function fetchFixture(input, options) {
+      assert.ok(String(input).endsWith(`/api/v1/files/${encodeURIComponent(source.fileId)}`))
+      assert.equal(options?.signal, controller.signal)
+      return Promise.resolve(new Response(responseBytes, { headers: { etag } }))
+    })
+    const blob = await fetchMountedPbp(source, controller.signal)
+    assert.deepEqual(Buffer.from(await blob.arrayBuffer()), expected)
+    assert.equal(bytes.readUInt32LE(endPatch.offset), 0)
+    etag = `"${'b'.repeat(64)}"`
+    await assert.rejects(fetchMountedPbp(source, controller.signal), /unavailable or changed/u)
+    etag = `"${source.revision}"`
+    responseBytes = expected
+    await assert.rejects(fetchMountedPbp(source, controller.signal), /zero-padded terminator/u)
+    await assert.rejects(
+      fetchMountedPbp({ ...source, patch: { ...endPatch, offset: bytes.length - 4 } }, controller.signal),
+      /Invalid mounted PlayStation PBP end offset/u,
+    )
+  })
+
+  await it('cancels a pending patched PBP download without handing incomplete content to Nostalgist', async (t) => {
+    const { endPatch } = createSyntheticPsxPbp()
+    const source = { fileId: getMountedFileId('roms', 'ps1/Fixture.PBP'), patch: endPatch, revision: 'a'.repeat(64) }
+    const requested = Promise.withResolvers<AbortSignal>()
+    t.mock.method(globalThis, 'fetch', function waitForAbort(_input, options) {
+      const { signal } = options ?? {}
+      assert.ok(signal)
+      requested.resolve(signal)
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Fixture download aborted', 'AbortError')), {
+          once: true,
+        })
+      })
+    })
+    const preparation = createMountedPbpPreparation(source)
+    const playback = preparation.prepare({ core: 'pcsx_rearmed', rom: [] }, 'Fixture.PBP')
+    const cancellation = assert.rejects(playback, { name: 'AbortError' })
+    const signal = await requested.promise
+    preparation.cancel()
+    await cancellation
+    assert.equal(signal.aborted, true)
   })
 
   await it('indexes only bounded, case-exact local CHD playlists without absorbing standalone rows', async (t) => {

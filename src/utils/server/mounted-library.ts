@@ -5,6 +5,7 @@ import { HTTPException } from 'hono/http-exception'
 import { getRunTimeEnv } from '#@/constants/env.ts'
 import {
   getMountedFormat,
+  isMountedPsxPbp,
   resolveMountedPlatform,
   type MountedLibrarySettings,
   type MountedMediaFile,
@@ -34,6 +35,7 @@ import {
   type MountedMetadataMatch,
   type PlaylistDiscRequest,
 } from './mounted-library-runtime.ts'
+import { inspectMountedPbp } from './mounted-pbp.ts'
 import { inspectMountedPlaylist, isMountedPlaylistPath, openIndexedMountedMedia } from './mounted-playlist.ts'
 
 type Library = ReturnType<typeof createDrizzle>['library']
@@ -173,14 +175,21 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
           continue
         }
         const fileId = getMountedFileId('roms', relative)
-        const { revision } = await getMountedFileInfo(configuration.roms, relative)
+        const {
+          pbpEndPatch,
+          revision,
+          unsupportedReason = format.unsupportedReason,
+        }: Pick<MountedSource, 'pbpEndPatch' | 'revision' | 'unsupportedReason'> = isMountedPsxPbp(platform, extension)
+          ? await inspectMountedPbp(configuration.roms, relative)
+          : await getMountedFileInfo(configuration.roms, relative)
         const source: MountedSource = {
           artwork: automaticMetadataEnabled() ? 'pending' : 'disabled',
           available: true,
           metadata: automaticMetadataEnabled() ? 'pending' : 'disabled',
           path: relative,
+          pbpEndPatch,
           revision,
-          unsupportedReason: format.unsupportedReason,
+          unsupportedReason,
         }
         discovered.set(fileId, { fileName: segments.join('/'), platform, source })
         if (platform === 'psx') {
@@ -232,6 +241,8 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
           const replaced = previous.revision !== item.source.revision
           const compatibilityChanged =
             previous.unsupportedReason !== item.source.unsupportedReason ||
+            previous.pbpEndPatch?.offset !== item.source.pbpEndPatch?.offset ||
+            previous.pbpEndPatch?.end !== item.source.pbpEndPatch?.end ||
             previous.playlist?.revision !== item.source.playlist?.revision ||
             previous.playlistIssue?.code !== item.source.playlistIssue?.code ||
             previous.playlistIssue?.line !== item.source.playlistIssue?.line
@@ -239,13 +250,15 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
             const staleIdentification =
               previous.unsupportedReason &&
               !item.source.unsupportedReason &&
-              previous.identification?.mode === 'name-only'
+              previous.identification?.mode === 'name-only' &&
+              !isMountedPsxPbp(item.platform, path.posix.extname(item.source.path))
             const mountedSource =
               replaced && previous.metadata !== 'manual'
                 ? item.source
                 : {
                     ...previous,
                     available: true,
+                    pbpEndPatch: item.source.pbpEndPatch,
                     playlist: item.source.playlist,
                     playlistIssue: item.source.playlistIssue,
                     revision: item.source.revision,
@@ -425,6 +438,12 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
         .limit(1)
       if (!rom?.mountedSource?.available || getMountedFileId('roms', rom.mountedSource.path) !== id) {
         throw new HTTPException(404, { message: 'Mounted file not found' })
+      }
+      if (
+        rom.mountedSource.unsupportedReason &&
+        isMountedPsxPbp(rom.platform, path.posix.extname(rom.mountedSource.path))
+      ) {
+        throw new HTTPException(422, { message: rom.mountedSource.unsupportedReason })
       }
       relative = rom.mountedSource.path
       revision = rom.mountedSource.revision

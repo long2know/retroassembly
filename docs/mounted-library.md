@@ -158,16 +158,38 @@ files over 32 MiB. Synthetic fixtures prove byte routing only, never firmware
 validity. Uploaded BIOS remains a fallback when a mounted match is unavailable
 or the feature is disabled.
 
-Supported standalone extensions remain the upstream platform lists (including
-standalone PlayStation CHD). Mounted PlayStation `.m3u` playlists are supported
-as described below. CUE/BIN disc sets, ISO, PBP, M3U8, mixed-format playlists and
-playlists for other systems are not playable. The scanner shows why a
-recognized format or playlist is unsupported; it never converts source files.
+Supported standalone extensions follow the upstream platform lists, with
+compatible PlayStation PBP additionally supported on Node mounts. Mounted
+PlayStation `.m3u` playlists must contain only CHDs. CUE/BIN disc sets, ISO,
+M3U8, mixed-format playlists and playlists for other systems are not playable.
+The scanner shows why a recognized format or playlist is unsupported; it
+never converts source files.
 After an upgrade, run **Scan ROM folders** to refresh compatibility for
 unchanged entries, including previously unsupported Virtual Boy `.bin` cartridges
 in `vb` or `virtualboy` folders.
 Archive/core/ROM-set compatibility is still the upstream browser runtime’s
 responsibility; indexing a supported extension is not a compatibility guarantee.
+
+### Standalone PlayStation PBP
+
+The pinned PCSX ReARMed browser core can play compatible, unencrypted single-disc
+`.pbp` images in mounted `psx` or `ps1` folders, including `.PBP`. Both an explicit
+final block end and the standard zero-padded index terminator (as written by
+PSXPackager) are accepted. For a zero terminator, the browser supplies the validated
+end offset to the emulator in memory; the mounted file and authenticated file
+responses remain byte-for-byte unchanged.
+
+Packages with stored (uncompressed) blocks, encrypted packages, PSP games/updates,
+multi-disc PBP and PBP entries in M3U are not supported. Scanning checks the
+container, disc table and block index and samples compressed blocks; it does not
+verify every block or guarantee that a game boots.
+
+After upgrading, run **Scan ROM folders** to enable compatible PBP files already
+in the index, including those previously blocked for a missing final block end.
+Rescanning preserves existing IDs and metadata. Identification uses the name,
+not the container hash. Compatible PBP uses the same app save states as other
+standalone games. PlayStation uploads still accept only CHD; PBP support is not
+available on Workers.
 
 ### PlayStation disc playlists
 
