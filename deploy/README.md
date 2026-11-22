@@ -291,10 +291,13 @@ upstream repository with the fork's maintenance PR.
 
 The top-level ROM folders identify platforms, including implemented ES-DE aliases
 such as `famicom` → `nes`, `megadrive` → `genesis`, and `ps1` → `psx`.
-Games can be nested beneath those folders. Only upstream-supported browser platforms and
-file extensions are launchable. CUE/M3U/multifile disc dependencies are not resolved;
-PlayStation currently requires a standalone supported CHD. The app does not convert,
-move, rename, delete, or repair source files. Symlinks and source escapes are rejected.
+Games can be nested beneath those folders. Mounted PlayStation supports standalone CHD,
+compatible unencrypted single-disc PBP with compressed blocks (including standard
+zero-padded indexes), and bounded M3U playlists containing only CHDs.
+CUE/BIN and other multi-file disc dependencies are not resolved. See the
+[mounted library format limits](../docs/mounted-library.md#bios-and-browser-format-boundaries).
+The app does not convert, move, rename, delete, or repair source files. Symlinks and source
+escapes are rejected.
 
 BIOS discovery uses upstream expected filenames, and expected MD5 checksums where supplied.
 Discovery does not prove that arbitrary bytes are valid firmware. Existing native saves,

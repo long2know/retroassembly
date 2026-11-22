@@ -67,6 +67,11 @@ export interface MountedPlaylistIssue {
   line?: number
 }
 
+export interface MountedPbpEndPatch {
+  offset: number
+  end: number
+}
+
 export interface MountedSource extends MountedMediaFile {
   available: boolean
   metadata: 'disabled' | 'pending' | 'ready' | 'error' | 'manual'
@@ -77,6 +82,7 @@ export interface MountedSource extends MountedMediaFile {
   artworkError?: string
   artworkAttemptedAt?: number
   identification?: MountedIdentification
+  pbpEndPatch?: MountedPbpEndPatch
   playlist?: MountedPlaylist
   playlistIssue?: MountedPlaylistIssue
   unsupportedReason?: string
@@ -151,16 +157,24 @@ const knownRomExtensions = new Set([
   '.v64',
 ])
 
+export function isMountedPsxPbp(platform: PlatformName, extension: string) {
+  return platform === 'psx' && extension.toLowerCase() === '.pbp'
+}
+
 export function getMountedFormat(platform: PlatformName, extension: string) {
   const ext = extension.toLowerCase()
-  if (platformMap[platform].fileExtensions.includes(ext) || (platform === 'psx' && ext === '.m3u')) {
+  if (
+    platformMap[platform].fileExtensions.includes(ext) ||
+    (platform === 'psx' && ext === '.m3u') ||
+    isMountedPsxPbp(platform, ext)
+  ) {
     return { supported: true }
   }
   if (['.cue', '.m3u', '.m3u8', '.iso', '.ccd', '.gdi', '.pbp'].includes(ext)) {
     return {
       supported: false,
       unsupportedReason:
-        'This mounted disc/playlist format is not supported. For PlayStation, use a standalone CHD or an M3U listing only CHDs. No source conversion is performed.',
+        'This mounted disc/playlist format is not supported. PlayStation mounts accept standalone CHD, compatible single-disc PBP, or M3U listing only CHDs. No source conversion is performed.',
     }
   }
   if (knownRomExtensions.has(extension.toLowerCase())) {

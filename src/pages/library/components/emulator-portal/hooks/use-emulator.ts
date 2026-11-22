@@ -60,8 +60,14 @@ export function useEmulator() {
     state,
   } = useLoaderData<{ core?: CoreName; currentUser?: { id: string }; state?: State | null }>()
   const { preference } = usePreference()
-  const { activeEmulator, emulatorGamepadMapping, playlistStartFailed, setActiveEmulator, setPlaylistStartFailed } =
-    useEmulatorSession()
+  const {
+    activeEmulator,
+    emulatorGamepadMapping,
+    mountedPbp: pbpPreparation,
+    playlistStartFailed,
+    setActiveEmulator,
+    setPlaylistStartFailed,
+  } = useEmulatorSession()
   const [launched, setLaunched] = useEmulatorLaunched()
   const isDemo = useIsDemo()
   const { revalidate } = useRevalidator()
@@ -117,6 +123,9 @@ export function useEmulator() {
   const accountId = currentUser?.id
   const cartridge =
     !isDemo && accountId && isInGameSaveCandidate(rom.platform, rom.fileName, core) ? romObject : undefined
+  const mountedPbp = !isDemo && core === 'pcsx_rearmed' ? pbpPreparation : undefined
+  const canPrepare =
+    !rom.mountedSource?.unsupportedReason && (!activeEmulator || activeEmulator.mountedPbp === mountedPbp)
 
   const {
     data: prepared,
@@ -124,11 +133,20 @@ export function useEmulator() {
     isValidating,
     mutate: prepare,
   } = useSWRImmutable(
-    rom.mountedSource?.unsupportedReason ? null : { cartridge, options, playlist, romId },
-    async (key) =>
-      key.playlist
-        ? { ...(await prepareMountedPlaylist(key.options, key.romId, key.playlist)), digest: undefined }
-        : await prepareDirectGame(key.options, key.cartridge),
+    canPrepare ? { cartridge, options, pbp: mountedPbp?.source, playlist, romId } : null,
+    async (key) => {
+      if (key.playlist) {
+        return { ...(await prepareMountedPlaylist(key.options, key.romId, key.playlist)), digest: undefined }
+      }
+      if (key.pbp) {
+        if (key.pbp !== mountedPbp?.source) {
+          throw new DOMException('Mounted PlayStation PBP changed before preparation', 'AbortError')
+        }
+        const emulator = await mountedPbp.prepare(key.options, romObject.fileName)
+        return { digest: undefined, emulator, playlistPlayback: undefined }
+      }
+      return await prepareDirectGame(key.options, key.cartridge)
+    },
   )
 
   const emulator = activeEmulator?.emulator ?? prepared?.emulator
@@ -179,6 +197,7 @@ export function useEmulator() {
               state: { phase: 'loading' },
             }
           : undefined,
+      mountedPbp,
       options,
       playlistPlayback,
       resumePlaylistState,

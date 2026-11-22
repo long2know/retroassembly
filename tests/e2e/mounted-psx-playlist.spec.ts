@@ -1,17 +1,17 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import type { MountedPlaylistState, MountedSource } from '../../src/constants/mounted-library.ts'
-import { syntheticPsxPlaylist } from './fixtures/synthetic-psx.ts'
+import { createSyntheticPsxPbp, syntheticPsxPbp, syntheticPsxPlaylist } from './fixtures/synthetic-psx.ts'
 
 interface Save {
   fileId: string
   id: string
-  playlist: MountedPlaylistState
+  playlist: MountedPlaylistState | null
 }
 
-type DiscColor = 'red' | 'green' | 'blue'
+type DiscColor = 'red' | 'green' | 'blue' | 'magenta'
 
 async function expectColor(page: Page, expected: DiscColor) {
   const canvas = page.locator('#canvas')
@@ -41,6 +41,9 @@ async function expectColor(page: Page, expected: DiscColor) {
           ctx.drawImage(image, 0, 0)
           const [red, green, blue] = ctx.getImageData(0, 0, 1, 1).data
           image.close()
+          if (red > 170 && blue > 170 && green < 70) {
+            return 'magenta'
+          }
           if (blue > 170 && red < 70 && green < 70) {
             return 'blue'
           }
@@ -249,4 +252,97 @@ test('switches real mounted PlayStation discs lazily and restores private disc-b
   await expect(overlay.getByText('Rewind')).toHaveCount(0)
   await overlay.getByRole('button', { exact: true, name: 'Exit' }).click()
   await expect(page.locator('#canvas')).not.toBeAttached()
+})
+
+test('boots and resumes a zero-padded compressed mounted PlayStation PBP', async ({ page }) => {
+  const deployment = process.env.RETROASSEMBLY_MOUNTED_TEST_URL
+  test.skip(!deployment, 'Requires the mounted synthetic PlayStation acceptance fixture')
+  const { origin, pathname } = new URL(deployment || '')
+  const basePath = pathname.replace(/\/$/u, '')
+  function appPath(path: string) {
+    return `${basePath}${path}`
+  }
+  const registration = await page.request.post(appPath('/api/v1/auth/register'), {
+    form: { password: `fixture-only-${randomUUID()}`, username: `pbp-${randomUUID().slice(0, 8)}` },
+  })
+  expect(registration.ok(), await registration.text()).toBe(true)
+  const listing = await page.request.get(appPath('/api/v1/roms/search?query=Standalone%20Magenta'))
+  expect(listing.ok(), await listing.text()).toBe(true)
+  const { roms }: { roms: { fileId: string; fileName: string; id: string; mountedSource: MountedSource }[] } =
+    await listing.json()
+  const rom = roms.find(({ fileName }) => fileName === syntheticPsxPbp)
+  if (!rom) {
+    throw new Error('Production acceptance must provide the standalone PBP')
+  }
+  expect(rom.mountedSource.unsupportedReason).toBeUndefined()
+  expect(rom.mountedSource.playlist).toBeUndefined()
+  const { bytes: fixture, endPatch } = createSyntheticPsxPbp()
+  expect(fixture.readUInt32LE(endPatch.offset)).toBe(0)
+  expect(rom.mountedSource.pbpEndPatch).toEqual(endPatch)
+  const coreUrl =
+    'https://cdn.jsdelivr.net/gh/arianrhodsandlot/retroarch-emscripten-build@v1.22.2-1/retroarch/pcsx_rearmed_libretro.zip'
+  const filePath = appPath(`/api/v1/files/${encodeURIComponent(rom.fileId)}`)
+  const start = page.getByRole('button', { exact: true, name: 'Start' })
+  await page.route(
+    (url) => url.pathname === filePath,
+    (route) => route.fulfill({ body: fixture, headers: { etag: `"${'0'.repeat(64)}"` }, status: 200 }),
+    { times: 1 },
+  )
+  await page.goto(appPath(`/library/platform/psx/rom/${encodeURIComponent(rom.fileName)}?rom_id=${rom.id}`))
+  const retry = page.getByRole('button', { exact: true, name: 'Retry' })
+  await expect(retry).toBeVisible()
+  await expect(start).toHaveCount(0)
+
+  const core = page.waitForResponse((response) => response.url() === coreUrl)
+  const content = page.waitForResponse(
+    (response) =>
+      response.url() === `${origin}${filePath}` && response.headers().etag === `"${rom.mountedSource.revision}"`,
+  )
+  await retry.click()
+  await expect(start).toBeEnabled({ timeout: 90_000 })
+  const coreResponse = await core
+  expect(coreResponse.ok()).toBe(true)
+  const romResponse = await content
+  expect(romResponse.ok()).toBe(true)
+  expect(romResponse.headers()['content-length']).toBe(String(fixture.length))
+  for (const pathname of [filePath, appPath(`/api/v1/roms/${rom.id}/content`)]) {
+    const response = await page.request.get(pathname)
+    expect(response.ok()).toBe(true)
+    const original = await response.body()
+    expect(createHash('sha256').update(original).digest('hex')).toBe(createHash('sha256').update(fixture).digest('hex'))
+  }
+  await start.click()
+  await expectColor(page, 'magenta')
+
+  const overlay = page.locator('.game-overlay')
+  await page.keyboard.press('Escape')
+  await expect(overlay).toBeVisible()
+  await expect(overlay.getByRole('group', { name: 'Change disc' })).toHaveCount(0)
+  const saved = page.waitForResponse(
+    (response) => response.url() === `${origin}${appPath('/api/v1/states')}` && response.request().method() === 'POST',
+  )
+  await overlay.getByRole('button', { exact: true, name: 'Save & Exit' }).click()
+  const saveResponse = await saved
+  expect(saveResponse.ok(), await saveResponse.text()).toBe(true)
+  const save: Save = await saveResponse.json()
+  expect(save).toMatchObject({ core: 'pcsx_rearmed', playlist: null })
+  await expect(page.locator('#canvas')).not.toBeAttached()
+
+  const stateUrl = `${origin}${appPath(`/api/v1/files/${encodeURIComponent(save.fileId)}`)}`
+  const stateBytes = page.waitForResponse(
+    (response) => response.url() === stateUrl && response.request().method() === 'GET',
+  )
+  await page.reload()
+  const resume = page.getByRole('button', { name: /^Continue\b/u })
+  await expect(resume).toBeEnabled({ timeout: 90_000 })
+  const stateResponse = await stateBytes
+  expect(stateResponse.ok()).toBe(true)
+  await resume.click()
+  await expectColor(page, 'magenta')
+
+  const reportDirectory = path.dirname(
+    process.env.RETROASSEMBLY_MOUNTED_TEST_REPORT || 'node_modules/.cache/ci/built-image.json',
+  )
+  await fs.mkdir(reportDirectory, { recursive: true })
+  await page.screenshot({ path: path.join(reportDirectory, `psx-pbp-playback${basePath ? '-subpath' : ''}.png`) })
 })
