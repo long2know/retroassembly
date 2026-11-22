@@ -230,12 +230,12 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
             continue
           }
           const replaced = previous.revision !== item.source.revision
-          const playlistChanged =
-            item.platform === 'psx' &&
-            isMountedPlaylistPath(item.source.path) &&
-            (previous.playlist?.revision !== item.source.playlist?.revision ||
-              previous.unsupportedReason !== item.source.unsupportedReason)
-          if (replaced || !previous.available || playlistChanged) {
+          const compatibilityChanged =
+            previous.unsupportedReason !== item.source.unsupportedReason ||
+            previous.playlist?.revision !== item.source.playlist?.revision ||
+            previous.playlistIssue?.code !== item.source.playlistIssue?.code ||
+            previous.playlistIssue?.line !== item.source.playlistIssue?.line
+          if (replaced || !previous.available || compatibilityChanged) {
             const mountedSource =
               replaced && previous.metadata !== 'manual'
                 ? item.source
