@@ -797,7 +797,7 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
   }
 
   return {
-    async applyMatch(rom: typeof romTable.$inferSelect, { candidateId, snapshot }: MountedMatchSelection) {
+    async applyMatch(rom: typeof romTable.$inferSelect, { candidateId, intent, snapshot }: MountedMatchSelection) {
       await assertCatalogSource(rom)
       if (snapshot !== matchSnapshot(rom)) {
         throw new MountedRepairError('metadata-stale')
@@ -808,6 +808,7 @@ export function createMountedLibrary(library: Library, configuration: MountedCon
       return await selectMountedCatalogMatch(library, rom, {
         assertCurrent: () => assertMetadataRepairSource(rom),
         entry,
+        intent,
       })
     },
     assertPlaylistDiscCurrent,

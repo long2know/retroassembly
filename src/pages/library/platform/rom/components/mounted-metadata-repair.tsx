@@ -1,9 +1,9 @@
 import { Button, Dialog, TextField } from '@radix-ui/themes'
-import { useState, type SubmitEvent } from 'react'
+import { useId, useState, type SubmitEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useRevalidator } from 'react-router'
 import { client, parseResponse } from '#@/api/client.ts'
-import type { MountedArtworkOutcome, MountedMatchCandidate } from '#@/constants/mounted-library.ts'
+import type { MountedArtworkOutcome, MountedMatchCandidate, MountedMatchIntent } from '#@/constants/mounted-library.ts'
 import { useGlobalLoaderData } from '#@/pages/hooks/use-global-loader-data.ts'
 import { DialogRoot } from '#@/pages/library/components/dialog-root.tsx'
 import { useIsDemo } from '#@/pages/library/hooks/use-demo.ts'
@@ -30,13 +30,14 @@ export function MountedMetadataRepair() {
   const { currentUser, env, mountedLibrary } = useGlobalLoaderData()
   const isDemo = useIsDemo()
   const rom = useRom()
+  const pickerId = useId()
   const { revalidate } = useRevalidator()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<{ candidates: MountedMatchCandidate[]; snapshot: string }>()
   const [operation, setOperation] = useState<'search' | 'select' | 'artwork'>()
   const [dialogError, setDialogError] = useState<string>()
   const [actionError, setActionError] = useState<string>()
-  const [selected, setSelected] = useState<MountedArtworkOutcome>()
+  const [selected, setSelected] = useState<{ artwork: MountedArtworkOutcome; intent: MountedMatchIntent }>()
   const [retried, setRetried] = useState<MountedArtworkOutcome>()
 
   if (isDemo || !currentUser || !rom.mountedSource?.available) {
@@ -74,19 +75,24 @@ export function MountedMetadataRepair() {
     }
   }
 
-  async function handleSelect(candidateId: string) {
+  async function handleSelect(candidateId: string, intent: MountedMatchIntent) {
     if (!results) {
       return
     }
     setOperation('select')
     setDialogError(undefined)
+    setSelected(undefined)
     try {
-      const result = await parseResponse(match.$post({ json: { candidateId, snapshot: results.snapshot }, param }))
-      setSelected(result.artwork)
-      setResults(undefined)
-      setRetried(undefined)
-      setActionError(undefined)
-      await revalidate()
+      const result = await parseResponse(
+        match.$post({ json: { candidateId, intent, snapshot: results.snapshot }, param }),
+      )
+      setSelected({ artwork: result.artwork, intent })
+      if (intent === 'match' || result.artwork === 'ready') {
+        setResults(undefined)
+        setRetried(undefined)
+        setActionError(undefined)
+        await revalidate()
+      }
     } catch (error) {
       setDialogError(t(errorKey(error)))
     } finally {
@@ -148,29 +154,43 @@ export function MountedMetadataRepair() {
             ) : null}
             {selected ? (
               <output className='mt-4 block'>
-                {t('game.metadataRepair.matchSaved')} {t(`game.metadataRepair.${selected}`)}
+                {selected.intent === 'match' ? `${t('game.metadataRepair.matchSaved')} ` : ''}
+                {t(`game.metadataRepair.${selected.artwork}`)}
               </output>
             ) : null}
             {results?.candidates.length ? (
               <ul aria-label={t('game.metadataRepair.results')} className='mt-4 divide-y divide-(--gray-a6)'>
                 {results.candidates.map(({ id, name, region, revision, shortName, year }) => {
                   const details = [shortName, region, revision, year].filter(Boolean).join(' · ')
+                  const labelId = `${pickerId}-${id}`
                   return (
-                    <li key={id}>
-                      <Button
-                        aria-label={t('game.metadataRepair.choose', { title: details ? `${name} · ${details}` : name })}
-                        className='h-auto! min-h-12 w-full justify-start! px-2 text-left whitespace-normal'
-                        disabled={Boolean(operation)}
-                        onClick={() => handleSelect(id)}
-                        type='button'
-                        variant='ghost'
-                      >
-                        <span className='flex flex-col gap-0.5'>
-                          <span>{name}</span>
-                          {details ? <span className='text-xs text-(--gray-11)'>{details}</span> : null}
-                        </span>
-                        <span aria-hidden className='icon-[mdi--chevron-right] ml-auto shrink-0' />
-                      </Button>
+                    <li className='flex flex-wrap items-center justify-between gap-2 py-2' key={id}>
+                      <div className='min-w-0' id={labelId}>
+                        <div className='text-sm font-medium'>{name}</div>
+                        {details ? <div className='text-xs text-(--gray-11)'>{details}</div> : null}
+                      </div>
+                      <div className='flex flex-wrap gap-2'>
+                        <Button
+                          aria-describedby={labelId}
+                          disabled={Boolean(operation)}
+                          onClick={() => handleSelect(id, 'cover')}
+                          size='2'
+                          type='button'
+                          variant='soft'
+                        >
+                          {t('game.metadataRepair.coverOnly')}
+                        </Button>
+                        <Button
+                          aria-describedby={labelId}
+                          disabled={Boolean(operation)}
+                          onClick={() => handleSelect(id, 'match')}
+                          size='2'
+                          type='button'
+                          variant='outline'
+                        >
+                          {t('game.metadataRepair.choose')}
+                        </Button>
+                      </div>
                     </li>
                   )
                 })}

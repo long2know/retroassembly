@@ -5,13 +5,23 @@ import path from 'node:path'
 import { expect, test } from '@playwright/test'
 import { build } from 'esbuild'
 import { z } from 'zod'
-import { catalogTitles, syntheticCover } from './fixtures/synthetic-catalog.ts'
+import {
+  atariCatalogTitles,
+  atariProviderMetadata,
+  catalogTitles,
+  syntheticCover,
+} from './fixtures/synthetic-catalog.ts'
 
 const romSchema = z.object({
   fileName: z.string(),
   gameBoxartFileIds: z.string().nullable(),
+  gameDescription: z.string().nullable(),
   gameName: z.string().nullable(),
   id: z.string(),
+  launchboxGameId: z.number().nullable(),
+  libretroGameId: z.string().nullable(),
+  platform: z.string(),
+  rawGameMetadata: z.record(z.string(), z.unknown()).nullable(),
 })
 
 function hash(bytes: Uint8Array) {
@@ -49,13 +59,19 @@ for (const basePath of ['', '/fixtures/retro']) {
   test(`chooses and repairs a mounted title in the production UI at ${basePath || '/'}`, async ({ page }, testInfo) => {
     const root = path.resolve('node_modules/.cache', `metadata-browser-${randomUUID()}`)
     const romDirectory = path.join(root, 'roms', 'nes')
+    const atariDirectory = path.join(root, 'roms', 'atari7800')
     const dataDirectory = path.join(root, 'data')
     const fixtureFile = path.join(romDirectory, 'Unknown cartridge.nes')
+    const atariFile = path.join(atariDirectory, 'Fixture cartridge.a78')
     await mkdir(romDirectory, { recursive: true })
+    await mkdir(atariDirectory, { recursive: true })
     await mkdir(dataDirectory)
     await writeFile(fixtureFile, 'Synthetic fixture; not an actual commercial game.')
+    await writeFile(atariFile, 'Synthetic Atari 7800 fixture; not an actual commercial game.')
     const initialHash = hash(await readFile(fixtureFile))
+    const atariHash = hash(await readFile(atariFile))
     const { mtimeMs } = await stat(fixtureFile)
+    const initialAtariStat = await stat(atariFile)
     let server: ChildProcess | undefined
     let logs = ''
     const providers: string[] = []
@@ -109,6 +125,21 @@ for (const basePath of ['', '/fixtures/retro']) {
         if (requestedOrigin === origin) {
           return route.continue()
         }
+        if (requestedOrigin === 'https://img.youtube.com' && pathname === '/vi/RAfixture78/mqdefault.jpg') {
+          return route.fulfill({
+            body: legacyCover,
+            contentType: 'image/png',
+            headers: { 'Access-Control-Allow-Origin': '*' },
+          })
+        }
+        if (
+          requestedOrigin === 'https://thumbnails.libretro.com' &&
+          decodeURIComponent(pathname).endsWith(`/${atariCatalogTitles.current}.png`)
+        ) {
+          return /\/Named_(?:Titles|Snaps)\//u.test(pathname)
+            ? route.fulfill({ body: legacyCover, contentType: 'image/png' })
+            : route.fulfill({ status: 404 })
+        }
         if (
           requestedOrigin === 'https://thumbnails.libretro.com' &&
           decodeURIComponent(pathname).endsWith('/Legacy Lantern (World).png')
@@ -132,8 +163,12 @@ for (const basePath of ['', '/fixtures/retro']) {
       expect(registered.status(), await registered.text()).toBe(200)
       const response = await page.request.get(appUrl('/api/v1/roms'))
       const { roms } = z.object({ roms: z.array(romSchema) }).parse(await response.json())
-      expect(roms.map(({ fileName }) => fileName)).toEqual(['Unknown cartridge.nes'])
-      const [rom] = roms
+      expect(roms.map(({ fileName }) => fileName).toSorted()).toEqual([
+        'Fixture cartridge.a78',
+        'Unknown cartridge.nes',
+      ])
+      const rom = romSchema.parse(roms.find(({ platform }) => platform === 'nes'))
+      const atari = romSchema.parse(roms.find(({ platform }) => platform === 'atari7800'))
       const detailsUrl = appUrl(`/library/platform/nes/rom/${encodeURIComponent(rom.fileName)}?rom_id=${rom.id}`)
       await page.goto(detailsUrl)
       await expect(page.getByRole('heading', { name: 'Unknown cartridge' })).toBeVisible()
@@ -147,8 +182,10 @@ for (const basePath of ['', '/fixtures/retro']) {
       await expect(dialog.getByText('No matches on this platform.', { exact: false })).toBeVisible()
       await query.fill('circuit lan')
       await dialog.getByRole('button', { name: 'Search' }).click()
-      await expect(dialog.getByRole('button', { name: /^Use match:/u })).toHaveCount(3)
-      await expect(dialog.getByRole('button', { name: /Circuit Lantern II.*Europe.*Rev 1.*1996/u })).toBeVisible()
+      await expect(dialog.getByRole('button', { name: 'Use full match' })).toHaveCount(3)
+      const sequel = dialog.getByRole('listitem').filter({ hasText: catalogTitles.sequel })
+      const fullMatch = sequel.getByRole('button', { name: 'Use full match' })
+      await expect(fullMatch).toHaveAccessibleDescription(/Circuit Lantern II.*Europe.*Rev 1.*1996/u)
       const unedited = await page.request.get(appUrl(`/api/v1/roms/${rom.id}`))
       const uneditedRom = romSchema.parse(await unedited.json())
       expect(uneditedRom.gameName).toBeNull()
@@ -160,7 +197,7 @@ for (const basePath of ['', '/fixtures/retro']) {
       })
       await testInfo.attach('mounted-metadata-match-results', { body: screenshot, contentType: 'image/png' })
 
-      await dialog.getByRole('button', { name: /Circuit Lantern II.*Europe/u }).click()
+      await fullMatch.click()
       await expect(dialog.getByText('Match saved. No replacement cover was found.')).toBeVisible()
       await dialog.getByRole('button', { name: 'Close' }).click()
       await page.reload()
@@ -214,6 +251,14 @@ for (const basePath of ['', '/fixtures/retro']) {
       ])
       expect(externalProviderRequests).toEqual([])
 
+      const atariIdentified = await page.request.post(appUrl(`/api/v1/roms/${atari.id}/identify`), {
+        data: { name: atariProviderMetadata.launchbox.name },
+      })
+      expect(atariIdentified.status(), await atariIdentified.text()).toBe(200)
+      const atariBefore = romSchema.parse(await atariIdentified.json())
+      expect(atariBefore.gameBoxartFileIds).toBeNull()
+      expect(atariBefore.rawGameMetadata).toEqual(atariProviderMetadata)
+
       const automatic = appUrl('/api/v1/mounted-library')
       const enable = await page.request.patch(automatic, { data: { automaticMetadata: true } })
       expect(enable.status(), await enable.text()).toBe(200)
@@ -246,6 +291,57 @@ for (const basePath of ['', '/fixtures/retro']) {
       await page.reload({ waitUntil: 'networkidle' })
       await expect(legacyArt).toHaveCount(0)
       expect(legacyArtworkRequests.some((pathname) => pathname.includes('/Named_Boxarts/'))).toBe(false)
+
+      const atariDetails = appUrl(
+        `/library/platform/atari7800/rom/${encodeURIComponent(atari.fileName)}?rom_id=${atari.id}`,
+      )
+      await page.goto(atariDetails)
+      const synopsis = page.getByText(atariProviderMetadata.launchbox.overview)
+      const video = page.getByRole('img', { name: 'YouTube thumbnail' })
+      await expect(synopsis).toBeVisible()
+      await expect(video).toBeVisible()
+      await page.getByRole('button', { name: 'Find match' }).click()
+      await query.fill('copper')
+      await dialog.getByRole('button', { name: 'Search' }).click()
+      const alternate = dialog.getByRole('listitem').filter({ hasText: atariCatalogTitles.alternate })
+      const coverOnly = alternate.getByRole('button', { name: 'Use cover only' })
+      await expect(coverOnly).toHaveAccessibleDescription(/Copper Circuit.*USA.*Rev B/u)
+      await expect(alternate.getByRole('button', { name: 'Use full match' })).toBeVisible()
+      const coverOnlyScreenshot = await page.screenshot({
+        animations: 'disabled',
+        path: basePath ? undefined : process.env.RETROASSEMBLY_MOUNTED_COVER_ONLY_SCREENSHOT,
+      })
+      await testInfo.attach('mounted-cover-only-repair', { body: coverOnlyScreenshot, contentType: 'image/png' })
+      await coverOnly.click()
+      await expect(dialog.getByRole('status')).toHaveText('Cover art is ready.')
+      await dialog.getByRole('button', { name: 'Close' }).click()
+      await page.reload()
+      const repair = await page.request.get(appUrl(`/api/v1/roms/${atari.id}`))
+      const { gameBoxartFileIds: atariCover, ...atariAfter } = romSchema.parse(await repair.json())
+      expect(atariAfter).toEqual({
+        fileName: atariBefore.fileName,
+        gameDescription: atariBefore.gameDescription,
+        gameName: atariBefore.gameName,
+        id: atariBefore.id,
+        launchboxGameId: atariBefore.launchboxGameId,
+        libretroGameId: atariBefore.libretroGameId,
+        platform: atariBefore.platform,
+        rawGameMetadata: atariBefore.rawGameMetadata,
+      })
+      const atariCoverId = z
+        .string()
+        .regex(/^metadata\//u)
+        .parse(atariCover)
+      const atariCoverPath = `/api/v1/files/${encodeURIComponent(atariCoverId)}`
+      const served = await page.request.get(appUrl(atariCoverPath))
+      expect(served.status()).toBe(200)
+      expect(hash(await served.body())).toBe(hash(syntheticCover()))
+      await expect(page.locator(`a img[src="${basePath}${atariCoverPath}"]`)).toHaveJSProperty('naturalWidth', 96)
+      await expect(synopsis).toBeVisible()
+      await expect(video).toBeVisible()
+      expect(hash(await readFile(atariFile))).toBe(atariHash)
+      const finalAtariStat = await stat(atariFile)
+      expect(finalAtariStat.mtimeMs).toBe(initialAtariStat.mtimeMs)
       expect(hash(await readFile(fixtureFile))).toBe(initialHash)
       const final = await stat(fixtureFile)
       expect(final.mtimeMs).toBe(mtimeMs)

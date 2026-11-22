@@ -5,7 +5,7 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { DateTime } from 'luxon'
 import { z } from 'zod'
-import { mountedPlaylistMaxDiscs, mountedRevisionPattern } from '#@/constants/mounted-library.ts'
+import { mountedMatchIntents, mountedPlaylistMaxDiscs, mountedRevisionPattern } from '#@/constants/mounted-library.ts'
 import { isPlatformName, type PlatformName } from '#@/constants/platform.ts'
 import { deleteLaunchRecord } from '#@/controllers/launch-records/delete-launch-record.ts'
 import { createRom } from '#@/controllers/roms/create-roms.ts'
@@ -233,6 +233,7 @@ export const roms = new Hono()
       z
         .object({
           candidateId: z.string().regex(mountedRevisionPattern),
+          intent: z.enum(mountedMatchIntents).optional(),
           snapshot: z.string().regex(mountedRevisionPattern),
         })
         .strict(),

@@ -9,6 +9,8 @@ import {
   getMountedManualMetadataFields,
   type MountedArtworkOutcome,
   type MountedIdentification,
+  type MountedMatchCandidate,
+  type MountedMatchIntent,
   type MountedSource,
 } from '#@/constants/mounted-library.ts'
 import { platformMap, type PlatformName } from '#@/constants/platform.ts'
@@ -184,8 +186,9 @@ function providerCoverNames(metadata: ProviderMetadata, title: string | null) {
 
 function currentCoverNames(rom: MountedRom) {
   const source = rom.mountedSource
-  if (source?.catalogMatch) {
-    return uniqueNames(source.catalogMatch.name, source.catalogMatch.shortName)
+  const match = source?.artworkMatch ?? source?.catalogMatch
+  if (match) {
+    return uniqueNames(match.name, match.shortName)
   }
   if (source && getMountedManualMetadataFields(source).includes('gameName')) {
     return uniqueNames(rom.gameName)
@@ -344,9 +347,10 @@ export async function enrichMountedRom(library: Library, rom: MountedRom, option
         'No provider match was found; edit the app metadata or retry with a different name',
       )
     }
+    const artworkMatch = match ? undefined : source.artworkMatch
     const { gameBoxartFileIds, ...artwork } = await resolveArtwork(
       current,
-      providerCoverNames(metadata, gameName),
+      artworkMatch ? uniqueNames(artworkMatch.name, artworkMatch.shortName) : providerCoverNames(metadata, gameName),
       options,
     )
     const date = launchbox?.releaseDate ? DateTime.fromISO(launchbox.releaseDate) : undefined
@@ -368,6 +372,7 @@ export async function enrichMountedRom(library: Library, rom: MountedRom, option
         ...source,
         artworkError: undefined,
         ...artwork,
+        artworkMatch,
         catalogMatch: undefined,
         identification: {
           ...identification,
@@ -405,45 +410,108 @@ export async function enrichMountedRom(library: Library, rom: MountedRom, option
   }
 }
 
+function matchesEditionDetail(name: string, previous: unknown, candidate?: string) {
+  if (candidate) {
+    return previous === candidate
+  }
+  return (
+    previous === undefined ||
+    previous === null ||
+    (typeof previous === 'string' && (name.includes(`(${previous})`) || name.includes(`[${previous}]`)))
+  )
+}
+
+function isCurrentCatalogRelease(rom: MountedRom, candidate: MountedMatchCandidate) {
+  const confirmed = rom.mountedSource?.catalogMatch
+  if (confirmed) {
+    return confirmed.id === candidate.id
+  }
+
+  const { data: previous } = metadataSchema.shape.libretro.safeParse(rom.rawGameMetadata?.libretro)
+  return (
+    previous?.name === candidate.name &&
+    previous.platform === platformMap[rom.platform].libretroName &&
+    (!rom.libretroGameId || previous.id === rom.libretroGameId) &&
+    matchesEditionDetail(candidate.name, previous.region, candidate.region) &&
+    matchesEditionDetail(candidate.name, previous.revision, candidate.revision) &&
+    (!candidate.shortName ||
+      (typeof previous.romName === 'string' && path.posix.parse(previous.romName).name === candidate.shortName))
+  )
+}
+
 export async function selectMountedCatalogMatch(
   library: Library,
   rom: MountedRom,
-  { assertCurrent, entry }: { assertCurrent: () => Promise<void>; entry: CatalogEntry },
+  {
+    assertCurrent,
+    entry,
+    intent = 'match',
+  }: { assertCurrent: () => Promise<void>; entry: CatalogEntry; intent?: MountedMatchIntent },
 ) {
   const source = rom.mountedSource
   if (!source?.available) {
     throw new MountedRepairError('source-unavailable')
   }
   const { candidate } = entry
-  const manualFields = new Set(getMountedManualMetadataFields(source))
-  const { gameBoxartFileIds, ...artwork } = await resolveArtwork(rom, entry.coverNames, { retryArtwork: true })
+  const coverOnly = intent === 'cover'
+  const sameRelease = !coverOnly && isCurrentCatalogRelease(rom, candidate)
+  const artworkMatch = sameRelease ? source.artworkMatch : undefined
+  const names = artworkMatch ? uniqueNames(artworkMatch.name, artworkMatch.shortName) : entry.coverNames
+  const { gameBoxartFileIds, ...artwork } = await resolveArtwork(rom, names, {
+    refreshArtwork: coverOnly,
+    retryArtwork: true,
+  })
   await assertCurrent()
+  if (coverOnly) {
+    if (artwork.artwork === 'ready' && gameBoxartFileIds) {
+      await updateMountedMetadata(library, rom, {
+        gameBoxartFileIds,
+        mountedSource: {
+          ...source,
+          artworkError: undefined,
+          ...artwork,
+          artworkMatch: { name: candidate.name, shortName: candidate.shortName },
+        },
+      })
+    }
+    return { artwork: reportedArtwork(artwork.artwork) }
+  }
+
+  const manualFields = new Set(getMountedManualMetadataFields(source))
+  const replacement = sameRelease
+    ? {}
+    : {
+        gameDescription: manualFields.has('gameDescription') ? undefined : null,
+        gameDeveloper: manualFields.has('gameDeveloper') ? undefined : (entry.developer ?? null),
+        gameGenres: manualFields.has('gameGenres') ? undefined : (entry.genres ?? null),
+        gamePlayers: manualFields.has('gamePlayers') ? undefined : (entry.players ?? null),
+        gamePublisher: manualFields.has('gamePublisher') ? undefined : (entry.publisher ?? null),
+        gameRating: null,
+        gameReleaseDate: manualFields.has('gameReleaseDate') ? undefined : null,
+        gameReleaseYear: manualFields.has('gameReleaseDate') ? null : (candidate.year ?? null),
+        launchboxGameId: null,
+        libretroGameId: null,
+        rawGameMetadata: null,
+      }
+  const identification =
+    sameRelease || !source.identification ? source.identification : { ...source.identification, confidence: undefined }
   await updateMountedMetadata(library, rom, {
+    ...replacement,
     gameBoxartFileIds,
-    gameDescription: manualFields.has('gameDescription') ? undefined : null,
-    gameDeveloper: manualFields.has('gameDeveloper') ? undefined : (entry.developer ?? null),
-    gameGenres: manualFields.has('gameGenres') ? undefined : (entry.genres ?? null),
     gameName: candidate.name,
-    gamePlayers: manualFields.has('gamePlayers') ? undefined : (entry.players ?? null),
-    gamePublisher: manualFields.has('gamePublisher') ? undefined : (entry.publisher ?? null),
-    gameRating: null,
-    gameReleaseDate: manualFields.has('gameReleaseDate') ? undefined : null,
-    gameReleaseYear: manualFields.has('gameReleaseDate') ? null : (candidate.year ?? null),
-    launchboxGameId: null,
-    libretroGameId: null,
     mountedSource: {
       ...source,
       artworkError: undefined,
       ...artwork,
+      artworkMatch,
       catalogMatch: { id: candidate.id, name: candidate.name, shortName: candidate.shortName },
-      identification: source.identification ? { ...source.identification, confidence: undefined } : undefined,
+      identification,
       manualMetadataFields: [...manualFields].filter((field) => field !== 'gameName'),
       metadata: 'manual',
       metadataAttemptedAt: Date.now(),
       metadataError: undefined,
       metadataOutcome: 'matched',
     },
-    rawGameMetadata: null,
   })
   return { artwork: reportedArtwork(artwork.artwork) }
 }

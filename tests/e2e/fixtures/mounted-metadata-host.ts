@@ -4,7 +4,13 @@ import { serve } from '@hono/node-server'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
-import { catalogTitles, syntheticCatalog, syntheticCover } from './synthetic-catalog.ts'
+import {
+  atariCatalogTitles,
+  atariProviderMetadata,
+  catalogTitles,
+  syntheticCatalog,
+  syntheticCover,
+} from './synthetic-catalog.ts'
 
 const db = new Database(path.join(process.env.RETROASSEMBLY_RUN_TIME_DATA_DIRECTORY || '', 'retroassembly.sqlite'))
 migrate(drizzle(db), { migrationsFolder: 'src/databases/migrations' })
@@ -14,6 +20,7 @@ db.prepare(
 db.close()
 
 let mirrorRequests = 0
+let atariCoverRequests = 0
 function providerResponse(input: Parameters<typeof fetch>[0], init?: RequestInit) {
   const url = new URL(input instanceof Request ? input.url : input)
   const pathname = decodeURIComponent(url.pathname)
@@ -22,12 +29,28 @@ function providerResponse(input: Parameters<typeof fetch>[0], init?: RequestInit
     return new Response(null, { status: 500 })
   }
   if (url.origin === 'https://metadata.fixture.invalid' && pathname.endsWith('/metadata/identify')) {
+    if (typeof init.body === 'string' && init.body.includes('"platform":"atari7800"')) {
+      return Response.json([atariProviderMetadata])
+    }
     return Response.json([
       {
         launchbox: { name: 'Legacy Lantern' },
         libretro: { name: 'Legacy Lantern (World)', platform: 'Nintendo - Nintendo Entertainment System' },
       },
     ])
+  }
+  if (url.origin === 'https://raw.githubusercontent.com' && pathname.endsWith('/Atari - 7800.rdb')) {
+    return new Response(syntheticCatalog('atari7800'), { headers: { 'Content-Type': 'application/octet-stream' } })
+  }
+  if (
+    ['https://thumbnails.libretro.com', 'https://cdn.jsdelivr.net'].includes(url.origin) &&
+    /\/Named_Boxarts\/Copper Circuit(?: \(.+\))?\.png$/u.test(pathname)
+  ) {
+    if (pathname.endsWith(`/${atariCatalogTitles.alternate}.png`)) {
+      atariCoverRequests += 1
+      return new Response(syntheticCover(atariCoverRequests), { headers: { 'Content-Type': 'image/png' } })
+    }
+    return new Response(null, { status: 404 })
   }
   if (
     url.origin === 'https://raw.githubusercontent.com' &&
