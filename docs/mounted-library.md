@@ -181,11 +181,14 @@ responses remain byte-for-byte unchanged.
 
 Packages with stored (uncompressed) blocks, encrypted packages, PSP games/updates,
 multi-disc PBP and PBP entries in M3U are not supported. Scanning checks the
-container, disc table and block index and samples compressed blocks; it does not
-verify every block or guarantee that a game boots.
+container, disc table and block index and samples compressed blocks. It accepts
+both a disc-relative lead-out (as written by PSXPackager) and a lead-out that
+includes the 150-frame lead-in (as written by pop-fe when it generates the disc
+table). These checks do not verify every block or guarantee that a game boots.
 
 After upgrading, run **Scan ROM folders** to enable compatible PBP files already
-in the index, including those previously blocked for a missing final block end.
+in the index, including those previously blocked because of these index or
+lead-out differences.
 Rescanning preserves existing IDs and metadata. Identification uses the name,
 not the container hash. Compatible PBP uses the same app save states as other
 standalone games. PlayStation uploads still accept only CHD; PBP support is not

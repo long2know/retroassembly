@@ -1510,22 +1510,28 @@ await describe('mounted shared library', async () => {
     assert.deepEqual(await sourceSnapshot(f.roms), before)
   })
 
-  await it('enables a legacy mounted PlayStation PBP only on a complete scan and keeps its metadata and identity', async (t) => {
-    const { bytes, endPatch } = createSyntheticPsxPbp()
+  await it('enables a mounted PlayStation PBP with a lead-in-inclusive TOC on a complete read-only rescan', async (t) => {
+    const { bytes, endPatch } = createSyntheticPsxPbp({ layout: 'pop-fe' })
     const sourcePath = 'ps1/Legacy game.PBP'
+    const hiddenPath = 'ps1/Hidden.PBP'
     const f = await fixture(t, {
       'roms/PSX/First.chd': 'synthetic first CHD',
       'roms/PSX/Game.m3u': 'First.chd\nSecond.chd\n',
       'roms/PSX/Second.chd': 'synthetic second CHD',
+      [`roms/${hiddenPath}`]: bytes,
       [`roms/${sourcePath}`]: bytes,
     })
+    const sourceFile = path.join(f.roms, sourcePath)
+    await fs.chmod(sourceFile, 0o444)
+    await f.mounted.scan()
     const before = await sourceSnapshot(f.roms)
     const roms = f.library.select().from(romTable).all()
     const pbp = roms.find(({ fileId }) => fileId === getMountedFileId('roms', sourcePath))
+    const hidden = roms.find(({ fileId }) => fileId === getMountedFileId('roms', hiddenPath))
     const chd = roms.find(({ fileName }) => fileName === 'First.chd')
     const playlist = roms.find(({ fileName }) => fileName === 'Game.m3u')
-    assert.ok(pbp?.mountedSource && chd && playlist?.mountedSource?.playlist)
-    const legacyReason = 'This PlayStation PBP is missing the final block end offset required by the browser core.'
+    assert.ok(pbp?.mountedSource && hidden?.mountedSource && chd && playlist?.mountedSource?.playlist)
+    const legacyReason = 'The PlayStation PBP is malformed or truncated.'
     const manual = {
       gameBoxartFileIds: 'attachments/alice/legacy-cover.png',
       gameDescription: 'My description',
@@ -1552,6 +1558,13 @@ await describe('mounted shared library', async () => {
         },
       })
       .where(eq(romTable.id, pbp.id))
+    await f.library
+      .update(romTable)
+      .set({
+        mountedSource: { ...hidden.mountedSource, pbpEndPatch: undefined, unsupportedReason: legacyReason },
+        status: statusEnum.deleted,
+      })
+      .where(eq(romTable.id, hidden.id))
 
     function launch(id: string) {
       const body = new FormData()
@@ -1560,7 +1573,6 @@ await describe('mounted shared library', async () => {
       return f.request('/launch_records', { body, method: 'POST' })
     }
 
-    const sourceFile = path.join(f.roms, sourcePath)
     let failing = true
     let failed = false
     const opened = trackFileHandles(t, (handle, filename) => {
@@ -1609,6 +1621,11 @@ await describe('mounted shared library', async () => {
     await expectStatus(launch(pbp.id), 200)
     const launched = f.library.select().from(launchRecordTable).where(eq(launchRecordTable.romId, pbp.id)).get()
     assert.partialDeepStrictEqual(launched, { core: 'pcsx_rearmed', platform: 'psx', romId: pbp.id, userId: 'alice' })
+    const stillHidden = f.library.select().from(romTable).where(eq(romTable.id, hidden.id)).get()
+    assert.equal(stillHidden?.status, statusEnum.deleted)
+    assert.deepEqual(stillHidden?.mountedSource?.pbpEndPatch, endPatch)
+    assert.equal(stillHidden?.mountedSource?.unsupportedReason, undefined)
+    await expectStatus(f.request(`/roms/${hidden.id}/content`), 404)
     const fileUrl = `/files/${encodeURIComponent(pbp.fileId)}`
     await expectStatus(f.request(fileUrl, {}, ''), 400)
     for (const url of [fileUrl, `/roms/${pbp.id}/content`]) {
@@ -1640,10 +1657,12 @@ await describe('mounted shared library', async () => {
 
   await it('keeps unsupported or malformed PBP entries indexed without serving them as PlayStation discs', async (t) => {
     const { bytes, endPatch } = createSyntheticPsxPbp()
+    const { bytes: leadInBytes } = createSyntheticPsxPbp({ layout: 'pop-fe' })
     const psar = bytes.readUInt32LE(36)
     const index = psar + 0x40_00
-    function variant(edit: (copy: Buffer) => void) {
-      const copy = Buffer.from(bytes)
+    const leadOut = psar + 0x8_00 + 27
+    function variant(edit: (copy: Buffer) => void, source = bytes) {
+      const copy = Buffer.from(source)
       edit(copy)
       return copy
     }
@@ -1655,11 +1674,28 @@ await describe('mounted shared library', async () => {
         variant((copy) => copy.fill(0xff, psar + 0x10_00_00, psar + 0x10_00_01)),
         /unreadable disc blocks/u,
       ],
-      discontinuousIndex: [variant((copy) => copy.writeUInt32LE(0, index + 32)), /malformed or truncated/u],
-      largeBlock: [variant((copy) => copy.writeUInt32LE(16 * 2352 + 101, index + 4)), /malformed or truncated/u],
+      discontinuousIndex: [variant((copy) => copy.writeUInt32LE(0, index + 32)), /invalid block range/u],
+      earlyTerminator: [
+        variant((copy) => copy.fill(0, endPatch.offset - 32, endPatch.offset), leadInBytes),
+        /block index is too short/u,
+      ],
+      greatlyShortenedIndex: [
+        variant((copy) => copy.fill(0, index + 2 * 32, endPatch.offset), leadInBytes),
+        /block index is too short/u,
+      ],
+      largeBlock: [variant((copy) => copy.writeUInt32LE(16 * 2352 + 101, index + 4)), /invalid block range/u],
+      leadOutAheadOfIndex: [variant((copy) => copy.set([0, 6, 5], leadOut), leadInBytes), /block index is too short/u],
+      leadOutBetweenConventions: [
+        variant((copy) => copy.set([0, 5, 0x63], leadOut), leadInBytes),
+        /block index is too short/u,
+      ],
       multiDisc: [variant((copy) => copy.write('PSTITLEIMG', psar)), /Multi-disc PlayStation PBP/u],
       nonDisc: [variant((copy) => copy.write('NotADisc!!', psar)), /does not contain a supported single-disc/u],
       nonzeroPadding: [variant((copy) => copy.writeUInt8(1, endPatch.offset + 8)), /invalid final block index/u],
+      nonzeroPaddingAfterTerminator: [
+        variant((copy) => copy.writeUInt8(1, endPatch.offset + 32)),
+        /invalid final block index/u,
+      ],
       protected: [variant((copy) => copy.write('\0PGD', psar + 0x4_00)), /Protected PlayStation PBP/u],
       psp: [
         variant((copy) => {
@@ -1668,17 +1704,24 @@ await describe('mounted shared library', async () => {
         }),
         /PSP PBP/u,
       ],
-      stored: [createSyntheticPsxPbp(false).bytes, /Uncompressed blocks/u],
-      truncated: [bytes.subarray(0, -1), /malformed or truncated/u],
+      stored: [createSyntheticPsxPbp({ compressed: false }).bytes, /Uncompressed blocks/u],
+      storedWithFlag: [createSyntheticPsxPbp({ compressed: false, layout: 'pop-fe' }).bytes, /Uncompressed blocks/u],
+      trackPastLeadOut: [
+        variant((copy) => copy.set([0, 4, 0], psar + 0x8_00 + 33), leadInBytes),
+        /block index is too short/u,
+      ],
+      truncated: [leadInBytes.subarray(0, -1), /invalid block range/u],
       wrongEnd: [
         variant((copy) => copy.writeUInt32LE(endPatch.end - 1, endPatch.offset)),
         /invalid final block index/u,
       ],
     } as const
     const explicit = variant((copy) => copy.writeUInt32LE(endPatch.end, endPatch.offset))
+    const exactLeadIn = variant((copy) => copy.set([0, 6, 4], leadOut), leadInBytes)
     const f = await fixture(t, {
       ...Object.fromEntries(Object.entries(invalid).map(([name, [pbp]]) => [`roms/PSX/${name}.pbp`, pbp])),
       'roms/nes/Not a PlayStation mount.pbp': bytes,
+      'roms/PSX/Exact lead-in.pbp': exactLeadIn,
       'roms/PSX/Explicit end.pbp': explicit,
       'roms/PSX/First.chd': 'standalone CHD',
       'roms/PSX/Good.pbp': bytes,
@@ -1701,6 +1744,10 @@ await describe('mounted shared library', async () => {
     assert.ok(valid?.mountedSource)
     assert.equal(valid.mountedSource.unsupportedReason, undefined)
     assert.deepEqual(valid.mountedSource.pbpEndPatch, endPatch)
+    const atBoundary = roms.find(({ fileName }) => fileName === 'Exact lead-in.pbp')
+    assert.ok(atBoundary?.mountedSource)
+    assert.equal(atBoundary.mountedSource.unsupportedReason, undefined)
+    assert.deepEqual(atBoundary.mountedSource.pbpEndPatch, endPatch)
     const explicitEnd = roms.find(({ fileName }) => fileName === 'Explicit end.pbp')
     assert.ok(explicitEnd?.mountedSource)
     assert.equal(explicitEnd.mountedSource.unsupportedReason, undefined)
