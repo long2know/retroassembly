@@ -4,17 +4,16 @@ import { DeleteDialog } from './delete-dialog.tsx'
 import { FilterActions } from './filter-actions.tsx'
 import { SelectionActions } from './selection-actions.tsx'
 import { SelectionInfo } from './selection-info.tsx'
-import { useGameListActions } from './use-game-list-actions.ts'
 
-export function GameListActions() {
-  const { roms, selectedGames, setSelectedGames, shouldHideActions, hasSelectedGames, canSelectAll } =
-    useGameListActions()
+interface GameListActionsProps {
+  deletableRomIds: ReadonlySet<string>
+  selectedGames: string[]
+  setSelectedGames: (ids: string[]) => void
+}
 
+export function GameListActions({ deletableRomIds, selectedGames, setSelectedGames }: Readonly<GameListActionsProps>) {
+  const hasSelectedGames = selectedGames.length > 0
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-
-  if (shouldHideActions) {
-    return
-  }
 
   return (
     <div
@@ -27,15 +26,20 @@ export function GameListActions() {
         <>
           <SelectionInfo
             selectedCount={selectedGames.length}
-            canSelectAll={canSelectAll}
-            onSelectAll={() => setSelectedGames(roms.map(({ id }) => id))}
+            canSelectAll={selectedGames.length < deletableRomIds.size}
+            onSelectAll={() => setSelectedGames([...deletableRomIds])}
           />
           <SelectionActions
             selectedCount={selectedGames.length}
             onDelete={() => setDeleteDialogOpen(true)}
             onCancel={() => setSelectedGames([])}
           />
-          <DeleteDialog onOpenChange={setDeleteDialogOpen} open={deleteDialogOpen} />
+          <DeleteDialog
+            onDeleted={() => setSelectedGames([])}
+            onOpenChange={setDeleteDialogOpen}
+            open={deleteDialogOpen}
+            selectedGames={selectedGames}
+          />
         </>
       ) : (
         <FilterActions />

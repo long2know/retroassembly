@@ -2,16 +2,14 @@ import { useLocation } from 'react-router'
 import { libraryModeEnum } from '#@/databases/schema.ts'
 import { useGlobalLoaderData } from '#@/pages/hooks/use-global-loader-data.ts'
 import { routes } from '../../../routes.ts'
-import { useSelectedGames } from '../../atoms.ts'
 import { useIsDemo } from '../../hooks/use-demo.ts'
 import { useRoms } from '../../hooks/use-roms.ts'
 
 export function useGameListActions() {
   const { roms } = useRoms()
-  const [selectedGames, setSelectedGames] = useSelectedGames()
   const { pathname, search } = useLocation()
   const isDemo = useIsDemo()
-  const { currentUser } = useGlobalLoaderData()
+  const { currentUser, env } = useGlobalLoaderData()
 
   const isHistoryPage = pathname === routes.libraryHistory
   const isFavoritesPage = pathname === routes.libraryFavorites
@@ -19,6 +17,15 @@ export function useGameListActions() {
     currentUser?.libraryMode === libraryModeEnum.shared &&
     !roms.some((rom) => 'mountedSource' in rom && rom.mountedSource)
   const shouldHideActions = isDemo || isHistoryPage || isSharedLibrary
+  const isMountedOnly =
+    env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY === 'true' &&
+    env.RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY === 'true'
+  const canDeleteUploads = !shouldHideActions && !isMountedOnly && currentUser?.libraryMode === libraryModeEnum.isolated
+  const deletableRomIds = new Set(
+    canDeleteUploads
+      ? roms.filter((rom) => !rom.mountedSource && 'userId' in rom && rom.userId === currentUser.id).map(({ id }) => id)
+      : [],
+  )
 
   const searchParams = new URLSearchParams(search)
   const direction = searchParams.get('direction') || 'asc'
@@ -26,8 +33,6 @@ export function useGameListActions() {
   const sort = searchParams.get('sort') || 'name'
 
   const hasRoms = roms.length > 0
-  const hasSelectedGames = selectedGames.length > 0
-  const canSelectAll = selectedGames.length < roms.length
 
   const showFavoriteButton = (!isFavoritesPage && hasRoms) || isViewingFavorites
   const showSortDropdown = hasRoms
@@ -53,18 +58,15 @@ export function useGameListActions() {
 
   return {
     buildSortLink,
-    canSelectAll,
+    deletableRomIds,
     direction,
     getFavoriteToggleLink,
     hasRoms,
-    hasSelectedGames,
     isDemo,
     isViewingFavorites,
     pathname,
     roms,
     search,
-    selectedGames,
-    setSelectedGames,
     shouldHideActions,
     showFavoriteButton,
     showSortDropdown,

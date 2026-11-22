@@ -1,5 +1,5 @@
 import { atom, useAtom } from 'jotai'
-import type { CSSProperties } from 'react'
+import { useMemo, type CSSProperties } from 'react'
 
 const focusIndicatorStyleAtom = atom<CSSProperties>({})
 export function useFocusIndicatorStyle() {
@@ -21,8 +21,8 @@ export function useSpatialNavigationPaused() {
   return useAtom(spatialNavigationPaused)
 }
 
-const selectedGamesAtom = atom<string[]>([])
 export function useSelectedGames() {
+  const selectedGamesAtom = useMemo(() => atom<string[]>([]), [])
   return useAtom(selectedGamesAtom)
 }
 

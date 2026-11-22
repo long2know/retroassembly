@@ -1,51 +1,22 @@
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router'
-import { libraryModeEnum } from '#@/databases/schema.ts'
-import { useGlobalLoaderData } from '#@/pages/hooks/use-global-loader-data.ts'
+import { routes } from '#@/pages/routes.ts'
+import { useIsDemo } from './use-demo.ts'
 
-export function useGameActions(mounted = false) {
+export function useGameActions(canDeleteRom: boolean) {
   const { t } = useTranslation()
   const { pathname } = useLocation()
-  const { currentUser, env } = useGlobalLoaderData()
-  const pageType = pathname === '/library/history' ? 'history' : 'library'
+  const isDemo = useIsDemo()
+  const isHistory = pathname === routes.libraryHistory
+  const canDelete = !isDemo && (isHistory || canDeleteRom)
 
-  const isMountedOnly =
-    env.RETROASSEMBLY_RUN_TIME_ENABLE_SHARED_ROM_LIBRARY === 'true' &&
-    env.RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY === 'true'
-  const isSharedLibrary = currentUser?.libraryMode === libraryModeEnum.shared && !mounted && !isMountedOnly
+  const deleteAction = canDelete
+    ? ({
+        confirmDescription: t(isHistory ? 'dialog.confirmDeleteHistoryMessage' : 'dialog.confirmDeleteRomsMessage'),
+        text: t(isHistory ? 'game.deleteFromHistory' : 'game.deleteRom'),
+        type: isHistory ? 'launch_records' : 'roms',
+      } as const)
+    : undefined
 
-  const actionsMap = {
-    history: [
-      {
-        color: 'red',
-        confirmDescription: t('dialog.confirmDeleteHistoryMessage'),
-        icon: 'icon-[mdi--delete]',
-        name: 'delete',
-        text: t('game.deleteFromHistory'),
-        type: 'launch_records',
-      },
-    ],
-    library: isSharedLibrary
-      ? []
-      : [
-          {
-            confirmDescription: '',
-            icon: 'icon-[mdi--checkbox-multiple-marked]',
-            name: 'select',
-            text: t('common.select'),
-            type: '',
-          },
-          {
-            color: 'red',
-            confirmDescription: t('dialog.confirmDeleteRomsMessage'),
-            icon: 'icon-[mdi--delete]',
-            name: 'delete',
-            text: t('game.deleteRom'),
-            type: 'roms',
-          },
-        ],
-  } as const
-
-  const actions = actionsMap[pageType]
-  return { actions, pageType }
+  return { deleteAction, selectText: canDelete && !isHistory ? t('common.select') : undefined }
 }

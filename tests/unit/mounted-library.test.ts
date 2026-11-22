@@ -155,6 +155,10 @@ async function writeFixture(root: string, relative: string, bytes: string | Uint
   await writeFile(filename, bytes)
 }
 
+async function seedLegacyHiddenRom(library: ReturnType<typeof createDrizzle>['library'], id: string) {
+  await library.update(romTable).set({ status: statusEnum.deleted }).where(eq(romTable.id, id))
+}
+
 function playlistSaveForm(romId: string, type: 'auto' | 'manual', binding?: { disc: string; revision: string }) {
   const body = new FormData()
   body.set('core', 'pcsx_rearmed')
@@ -498,7 +502,7 @@ await describe('mounted shared library', async () => {
     await expectStatus(f.request(inGameSaveUrl(rom, changed), putSave(data, null)), 409)
     await expectStatus(f.request(newUrl, putSave(data, version)), 409)
     await expectStatus(f.request(newUrl, putSave(data, null)), 200)
-    await expectStatus(f.request(`/roms/${rom.id}`, { method: 'DELETE' }), 200)
+    await seedLegacyHiddenRom(f.library, rom.id)
     await expectStatus(f.request(newUrl), 404)
     await expectStatus(f.request(newUrl, putSave(data, null)), 404)
   })
@@ -680,6 +684,8 @@ await describe('mounted shared library', async () => {
     assert.equal(missing.id, original.id)
     assert.equal(missing.status, 1)
     assert.equal(missing.mountedSource?.available, false)
+    const deletion = await expectStatus(f.request(`/roms/${original.id}`, { method: 'DELETE' }), 404)
+    assert.deepEqual(await deletion.json(), { message: 'ROM not found' })
   })
 
   await it('keeps favorites, launch history, state content, and deletion private for shared games', async (t) => {
@@ -840,7 +846,7 @@ await describe('mounted shared library', async () => {
     assert.equal(unsupportedPlayback.gameCorePreference, null)
     assert.equal(singlePlayback.gameCorePreference, null)
 
-    await expectStatus(f.request(`/roms/${hidden.id}`, { method: 'DELETE' }), 200)
+    await seedLegacyHiddenRom(f.library, hidden.id)
     await rm(path.join(f.roms, 'nes/Missing.nes'))
     await f.mounted.scan()
     await expectStatus(f.setCore(hidden.id, 'nestopia'), 404)
@@ -848,7 +854,7 @@ await describe('mounted shared library', async () => {
     assert.deepEqual(await f.library.select().from(romCorePreferenceTable), [])
   })
 
-  await it('edits metadata/art and hides shared games without deleting or reimporting source files', async (t) => {
+  await it('edits shared metadata and art without writing source files', async (t) => {
     const f = await fixture(t)
     const {
       roms: [rom],
@@ -893,13 +899,108 @@ await describe('mounted shared library', async () => {
     await f.mounted.scan()
     const rescanned = await f.list()
     assert.equal(rescanned.roms[0].gameName, 'My corrected title')
-    await expectStatus(f.request(`/roms/${rom.id}`, { method: 'DELETE' }, 'bob'), 200)
-    await f.mounted.scan()
-    const hiddenList = await f.list()
-    assert.equal(hiddenList.pagination.total, 0)
     assert.deepEqual(await sourceSnapshot(f.roms), before)
-    const [hidden] = await f.library.select().from(romTable).where(eq(romTable.id, rom.id))
-    assert.equal(hidden.status, 0)
+  })
+
+  await it('rejects mounted ROM deletion for all users without mutating a mixed batch or its history', async (t) => {
+    const f = await fixture(t)
+    process.env.RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY = 'false'
+    t.mock.method(globalThis, 'fetch', () => Promise.resolve(Response.json([])))
+    const {
+      roms: [mounted],
+    } = await f.list()
+    const beforeSource = await sourceSnapshot(f.roms)
+    const patch = new FormData()
+    patch.set('gameName', 'Manually named mounted game')
+    await expectStatus(f.request(`/roms/${mounted.id}`, { body: patch, method: 'PATCH' }), 200)
+    const form = new FormData()
+    const uploadBytes = createSyntheticNesRom()
+    form.set('file', new File([Buffer.from(uploadBytes)], 'Owned upload.nes'))
+    form.set('platform', 'nes')
+    const upload = await expectStatus(f.request('/roms', { body: form, method: 'POST' }), 200)
+    const uploaded = z.object({ fileId: z.string(), id: z.string() }).parse(await upload.json())
+    for (const user of ['alice', 'bob']) {
+      for (const id of [uploaded.id, mounted.id]) {
+        const launch = new FormData()
+        launch.set('core', 'fceumm')
+        launch.set('rom', id)
+        await expectStatus(f.request('/launch_records', { body: launch, method: 'POST' }, user), 200)
+      }
+    }
+    const beforeRoms = await f.library.select().from(romTable)
+    const beforeHistory = await f.library.select().from(launchRecordTable)
+    const deletion = { method: 'DELETE' }
+    const mountedPath = `/roms/${mounted.id}`
+    const mountIsReadOnly = { message: 'Mounted ROMs are read-only and cannot be deleted.' }
+    for (const user of ['alice', 'bob']) {
+      for (const endpoint of [mountedPath, `/roms?ids=${mounted.id}`]) {
+        const response = await expectStatus(f.request(endpoint, deletion, user), 403)
+        assert.deepEqual(await response.json(), mountIsReadOnly)
+      }
+    }
+    const mixed = await expectStatus(f.request(`/roms?ids=${uploaded.id},${mounted.id}`, deletion), 403)
+    assert.deepEqual(await mixed.json(), mountIsReadOnly)
+    const sharedUpload = await expectStatus(f.request(`/roms/${uploaded.id}`, deletion, 'bob'), 403)
+    assert.deepEqual(await sharedUpload.json(), {
+      message: 'You are using a shared library and cannot modify its contents.',
+    })
+    assert.deepEqual(await f.library.select().from(romTable), beforeRoms)
+    assert.deepEqual(await f.library.select().from(launchRecordTable), beforeHistory)
+    const uploadPath = path.join(f.storage, uploaded.fileId)
+    assert.deepEqual(await readFile(uploadPath), Buffer.from(uploadBytes))
+
+    await expectStatus(f.request(`${mountedPath}/launch_records`, deletion, 'bob'), 200)
+    await expectStatus(f.request(`/roms?ids=${uploaded.id}`, deletion), 200)
+    await expectStatus(f.request(`/roms/${uploaded.id}`), 404)
+    await assert.rejects(readFile(uploadPath), { code: 'ENOENT' })
+    for (const user of ['alice', 'bob']) {
+      const { roms } = await f.list(user)
+      assert.deepEqual(
+        roms.map(({ gameName, id }) => ({ gameName, id })),
+        [{ gameName: 'Manually named mounted game', id: mounted.id }],
+      )
+    }
+    const activeHistory = await f.library
+      .select()
+      .from(launchRecordTable)
+      .where(eq(launchRecordTable.status, statusEnum.normal))
+    assert.deepEqual(activeHistory.map(({ romId, userId }) => `${userId}:${romId}`).toSorted(), [
+      `alice:${mounted.id}`,
+      `bob:${uploaded.id}`,
+    ])
+    assert.deepEqual(await sourceSnapshot(f.roms), beforeSource)
+  })
+
+  await it('does not update a ROM or its history if a mounted source is set after delete validation', async (t) => {
+    const fileId = 'roms/nes/owned.nes'
+    const f = await fixture(t, { ...defaultFiles, [`data/storage/${fileId}`]: 'synthetic upload' })
+    process.env.RETROASSEMBLY_RUN_TIME_SHARED_LIBRARY_ONLY = 'false'
+    const [mounted] = await f.library.select().from(romTable)
+    assert.ok(mounted.mountedSource)
+    const romId = 'owned-upload'
+    await f.library
+      .insert(romTable)
+      .values({ fileId, fileName: 'Owned.nes', id: romId, platform: 'nes', userId: 'alice' })
+    const launch = new FormData()
+    launch.set('core', 'fceumm')
+    launch.set('rom', romId)
+    await expectStatus(f.request('/launch_records', { body: launch, method: 'POST' }), 200)
+    const historyBefore = await f.library.select().from(launchRecordTable)
+    const { $client } = f.library
+    const prepare = $client.prepare.bind($client)
+    t.mock.method($client, 'prepare', (query: string) => {
+      if (query.startsWith('update "roms" set')) {
+        prepare('UPDATE roms SET mounted_source = ? WHERE id = ?').run(JSON.stringify(mounted.mountedSource), romId)
+      }
+      return prepare(query)
+    })
+
+    await expectStatus(f.request(`/roms/${romId}`, { method: 'DELETE' }), 200)
+    const [unchanged] = await f.library.select().from(romTable).where(eq(romTable.id, romId))
+    assert.equal(unchanged.status, statusEnum.normal)
+    assert.deepEqual(unchanged.mountedSource, mounted.mountedSource)
+    assert.deepEqual(await f.library.select().from(launchRecordTable), historyBefore)
+    assert.equal(await readFile(path.join(f.storage, fileId), 'utf8'), 'synthetic upload')
   })
 
   await it('allows only the oldest active account to restore a hidden mounted ROM without changing private activity', async (t) => {
@@ -964,7 +1065,7 @@ await describe('mounted shared library', async () => {
     const stateResponse = await expectStatus(f.request('/states', { body: stateForm, method: 'POST' }, 'bob'), 200)
     const state = z.object({ fileId: z.string(), id: z.string() }).parse(await stateResponse.json())
 
-    await expectStatus(f.request(`/roms/${rom.id}`, { method: 'DELETE' }, 'bob'), 200)
+    await seedLegacyHiddenRom(f.library, rom.id)
     await f.mounted.scan()
     for (const user of ['alice', 'bob']) {
       const { roms: visibleRoms } = await f.list(user)
@@ -973,6 +1074,8 @@ await describe('mounted shared library', async () => {
         [visible.id],
       )
       await expectStatus(f.request(`/roms/${rom.id}`, {}, user), 404)
+      const deletion = await expectStatus(f.request(`/roms/${rom.id}`, { method: 'DELETE' }, user), 404)
+      assert.deepEqual(await deletion.json(), { message: 'ROM not found' })
     }
     await expectStatus(f.request(`/roms/${rom.id}/content`), 404)
     await expectStatus(f.request(`/files/${encodeURIComponent(rom.fileId)}`), 404)
@@ -1011,7 +1114,7 @@ await describe('mounted shared library', async () => {
       assert.equal(Boolean(restoredRom.isFavorite), user === 'alice')
       const history = await expectStatus(f.request('/launch_records', {}, user), 200)
       const historyRoms = z.object({ roms: z.array(z.object({ id: z.string() })) }).parse(await history.json()).roms
-      assert.deepEqual(historyRoms, user === 'alice' ? [{ id: rom.id }] : [])
+      assert.deepEqual(historyRoms, [{ id: rom.id }])
     }
     const cover = await expectStatus(f.request(`/files/${encodeURIComponent(artId)}`), 200)
     assert.equal(await cover.text(), 'app-owned artwork')
@@ -1031,7 +1134,7 @@ await describe('mounted shared library', async () => {
     const listUrl = '/mounted-library/hidden'
     const restoreUrl = `${listUrl}/${rom.id}/restore`
     const restore = { method: 'POST' }
-    await expectStatus(f.request(`/roms/${rom.id}`, { method: 'DELETE' }), 200)
+    await seedLegacyHiddenRom(f.library, rom.id)
     await writeFixture(f.roms, rom.mountedSource.path, 'new synthetic bytes')
     const changed = await expectStatus(f.request(restoreUrl, restore), 409)
     assert.match(await changed.text(), /file changed/u)
@@ -1063,7 +1166,7 @@ await describe('mounted shared library', async () => {
     } = await f.list()
     assert.ok(rom.mountedSource)
     const filename = path.join(f.roms, rom.mountedSource.path)
-    await expectStatus(f.request(`/roms/${rom.id}`, { method: 'DELETE' }), 200)
+    await seedLegacyHiddenRom(f.library, rom.id)
     trackFileHandles(t, function reconcileAfterFileCheck(handle) {
       const { close } = handle
       t.mock.method(handle, 'close', async function removeAndScan() {
@@ -1419,6 +1522,9 @@ await describe('mounted shared library', async () => {
     const managedBiosFiles = await readdir(path.join(f.storage, 'bioses/famicom'))
     assert.equal(managedBiosFiles.length, 1)
     assert.equal(await readFile(path.join(f.storage, ownRom.fileId), 'utf8'), 'owned upload bytes')
+    await expectStatus(f.request(`/roms/${ownRom.id}`, { method: 'DELETE' }), 200)
+    await expectStatus(f.request(`/roms/${ownRom.id}`), 404)
+    await assert.rejects(readFile(path.join(f.storage, ownRom.fileId)), { code: 'ENOENT' })
   })
 
   await it('enables a previously unsupported Virtual Boy BIN on rescan without replacing the mounted ROM', async (t) => {
@@ -1460,7 +1566,7 @@ await describe('mounted shared library', async () => {
       .set({ mountedSource: { ...hidden.mountedSource, unsupportedReason } })
       .where(eq(romTable.id, hidden.id))
       .run()
-    await expectStatus(f.request(`/roms/${hidden.id}`, { method: 'DELETE' }), 200)
+    await seedLegacyHiddenRom(f.library, hidden.id)
 
     function launch(id: string, core = 'mednafen_vb', user = 'alice') {
       const body = new FormData()
@@ -1936,7 +2042,7 @@ await describe('mounted shared library', async () => {
     abort.abort()
     await assert.rejects(reader.read(), { name: 'AbortError' })
 
-    await expectStatus(f.request(`/roms/${game.id}`, { method: 'DELETE' }), 200)
+    await seedLegacyHiddenRom(f.library, game.id)
     await expectStatus(f.request(url(1), {}, 'bob'), 404)
     const restore = `/mounted-library/hidden/${game.id}/restore`
     await expectStatus(f.request(restore, { method: 'POST' }), 200)

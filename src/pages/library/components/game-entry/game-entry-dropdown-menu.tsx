@@ -1,54 +1,28 @@
 import { Checkbox, DropdownMenu, IconButton } from '@radix-ui/themes'
 import { clsx } from 'clsx'
 import { useState } from 'react'
-import { useLocation } from 'react-router'
-import { libraryModeEnum } from '#@/databases/schema.ts'
-import { useGlobalLoaderData } from '#@/pages/hooks/use-global-loader-data.ts'
-import { routes } from '#@/pages/routes.ts'
-import { useSelectedGames } from '../../atoms.ts'
-import { useIsDemo } from '../../hooks/use-demo.ts'
 import { useGameActions } from '../../hooks/use-game-actions.ts'
 import { DeleteDialog } from './delete-dialog.tsx'
 
-export function GameEntryDropdownMenu({ rom }) {
-  const { pathname } = useLocation()
-  const isDemo = useIsDemo()
-  const { currentUser } = useGlobalLoaderData()
-  const { actions } = useGameActions(Boolean(rom.mountedSource))
+interface GameEntryDropdownMenuProps {
+  onSelectedChange?: (checked: boolean) => void
+  rom: { fileName: string; id: string }
+  selected?: boolean
+}
+
+export function GameEntryDropdownMenu({ onSelectedChange, rom, selected }: Readonly<GameEntryDropdownMenuProps>) {
+  const { deleteAction, selectText } = useGameActions(Boolean(onSelectedChange))
   const [menuOpen, setMenuOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [selectedGames, setSelectedGames] = useSelectedGames()
 
-  function handleCheckedChange(checked: boolean) {
-    setSelectedGames(checked ? [...selectedGames, rom.id] : selectedGames.filter((id) => id !== rom.id))
-  }
-
-  function handleClickSelect() {
-    setSelectedGames([...selectedGames, rom.id])
-  }
-
-  function handleClickDelete() {
-    setDeleteDialogOpen(true)
-  }
-
-  function handleClick(name: string) {
-    const handlers = { delete: handleClickDelete, select: handleClickSelect }
-    const handler = handlers[name]
-    handler?.()
-  }
-
-  if (isDemo || (currentUser?.libraryMode === libraryModeEnum.shared && !rom.mountedSource)) {
+  if (!deleteAction) {
     return
   }
 
-  if (pathname === routes.libraryHome) {
-    return
-  }
-
-  if (selectedGames.length > 0) {
+  if (selected !== undefined) {
     return (
       <div className='absolute top-1 right-1 z-10'>
-        <Checkbox checked={selectedGames.includes(rom.id)} onCheckedChange={handleCheckedChange} value={rom.id} />
+        <Checkbox aria-label={rom.fileName} checked={selected} onCheckedChange={onSelectedChange} value={rom.id} />
       </div>
     )
   }
@@ -68,16 +42,20 @@ export function GameEntryDropdownMenu({ rom }) {
           </div>
         </DropdownMenu.Trigger>
         <DropdownMenu.Content>
-          {actions.map((action) => (
-            <DropdownMenu.Item color={action.color} key={action.name} onClick={() => handleClick(action.name)}>
-              <span className={action.icon} />
-              {action.text}
+          {selectText ? (
+            <DropdownMenu.Item onClick={() => onSelectedChange?.(true)}>
+              <span className='icon-[mdi--checkbox-multiple-marked]' />
+              {selectText}
             </DropdownMenu.Item>
-          ))}
+          ) : null}
+          <DropdownMenu.Item color='red' onClick={() => setDeleteDialogOpen(true)}>
+            <span className='icon-[mdi--delete]' />
+            {deleteAction.text}
+          </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Root>
 
-      <DeleteDialog onOpenChange={setDeleteDialogOpen} open={deleteDialogOpen} rom={rom} />
+      <DeleteDialog action={deleteAction} onOpenChange={setDeleteDialogOpen} open={deleteDialogOpen} romId={rom.id} />
     </>
   )
 }

@@ -48,13 +48,16 @@ Favorites, launch history, and savestates remain per-user, including generic
 file delivery for state/thumbnail bytes. New users automatically see indexed
 platforms; explicitly saved platform filters are respected.
 
-Shared titles/descriptions, manual matching, uploaded artwork, and hides are
-app-wide metadata edits. Deleting a mounted game hides its database row for all
-users; rescanning does not undo that hide and never unlinks the source.
-The app administrator (the oldest active account) can open **Settings → Library
-→ Hidden mounted games** and select **Restore for everyone**. This makes the
-same game visible again, retaining its metadata, artwork, and private favorites
-and savestates. It does not recover deleted launch history or uploaded ROMs.
+Shared titles/descriptions, manual matching, and uploaded artwork are app-wide
+metadata edits. Mounted ROMs cannot be deleted or hidden from the library, even
+by an administrator. ROM deletion and bulk selection apply only to uploads
+you can edit. **Delete from history** removes only your own launch records.
+
+Games hidden by older versions stay hidden across rescans. The app
+administrator (the oldest active account) can open **Settings → Library →
+Hidden mounted games** and select **Restore for everyone**. This makes the same
+game visible again, retaining its metadata, artwork, and private favorites and
+savestates. It does not recover deleted launch history or uploaded ROMs.
 Availability in the hidden list reflects the saved index. If a ROM is missing
 or has changed, make it available again and run **Scan ROM folders** under
 **ROM / Metadata** before retrying the restore.
@@ -99,6 +102,9 @@ Authenticated API endpoints:
 
 - `GET /api/v1/roms` and `GET /api/v1/roms/:id`: visible games/details.
 - `GET /api/v1/roms/:id/content`: original ROM bytes.
+- `DELETE /api/v1/roms/:id` and `DELETE /api/v1/roms?ids=…`: delete editable
+  uploads only. A visible mounted ROM returns `403`, and the entire batch is
+  rejected before any ROM or launch record is deleted.
 - `GET /api/v1/files/:encodedFileId`: authorized ROM, BIOS, art, or private state
   bytes; encode the complete opaque file ID as one URL component.
 - `GET /api/v1/mounted-library`: scan status, errors, BIOS warnings, persisted
